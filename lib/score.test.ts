@@ -4,6 +4,7 @@ import {
   meanRatingOf,
   scorePlace,
   blendSentiment,
+  hiddenGemIdSet,
   BAYES_CONFIDENCE,
   FALLBACK_MEAN_RATING,
 } from "./score";
@@ -153,5 +154,51 @@ describe("blendSentiment", () => {
   it("clamps to 0..100", () => {
     expect(blendSentiment(99, 1)).toBe(100);
     expect(blendSentiment(1, -1)).toBe(0);
+  });
+});
+
+describe("hiddenGemIdSet", () => {
+  const mk = (id: string, rating: number, reviews: number) => ({ id, rating, reviews });
+
+  it("returns an empty set for fewer than 4 places", () => {
+    expect(hiddenGemIdSet([mk("a", 5, 10), mk("b", 4.9, 20)])).toEqual(new Set());
+  });
+
+  it("flags top-quartile Bayesian places with <100 reviews", () => {
+    const places = [
+      mk("gem1", 4.9, 45),
+      mk("gem2", 4.8, 30),
+      mk("mid1", 4.2, 500),
+      mk("mid2", 4.1, 800),
+      mk("mid3", 4.0, 300),
+      mk("low1", 3.5, 150),
+      mk("low2", 3.2, 90),
+      mk("low3", 3.0, 40),
+    ];
+    const gems = hiddenGemIdSet(places);
+    expect(gems.has("gem1")).toBe(true);
+    expect(gems.has("gem2")).toBe(true);
+    expect(gems.has("low3")).toBe(false);
+  });
+
+  it("excludes top-quartile places with >= 100 reviews", () => {
+    const places = [
+      mk("popular", 4.9, 5000),
+      mk("mid1", 4.2, 500),
+      mk("mid2", 4.1, 800),
+      mk("mid3", 4.0, 300),
+    ];
+    expect(hiddenGemIdSet(places).has("popular")).toBe(false);
+  });
+
+  it("handles places with missing ratings without NaN", () => {
+    const places = [
+      { id: "a", reviews: 10 },
+      { id: "b", reviews: 20 },
+      { id: "c", rating: 4.5, reviews: 30 },
+      { id: "d", rating: 4.0, reviews: 400 },
+    ];
+    const gems = hiddenGemIdSet(places);
+    for (const id of Array.from(gems)) expect(typeof id).toBe("string");
   });
 });

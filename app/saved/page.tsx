@@ -10,9 +10,11 @@ import Toast from '../../components/Toast'
 import { useFavorites, DEFAULT_LIST_ID } from '../../hooks/useFavorites'
 import type { SavedList } from '../../hooks/useFavorites'
 import { semanticScore } from '../../lib/semantic'
+import { useLanguage } from '../../hooks/useLanguage'
 import type { Place } from '../../components/types'
 
 export default function SavedPage() {
+  const { t } = useLanguage()
   const { favorites, isFavorite, toggle, lists, places, createList, removeFromList, setNote, deleteList } = useFavorites()
   const [aiDisabled, setAiDisabled] = useState(false)
   const [selectedPlace, setSelectedPlace] = useState<Place | null>(null)
@@ -39,11 +41,11 @@ export default function SavedPage() {
     })
     const url = `${window.location.origin}/?${params.toString()}`
     const done = () => {
-      setToast('Link copied')
+      setToast(t('toast.linkCopied'))
       setTimeout(() => setToast(null), 2400)
     }
     if (navigator.clipboard?.writeText) {
-      navigator.clipboard.writeText(url).then(done, () => setToast('Could not copy the link'))
+      navigator.clipboard.writeText(url).then(done, () => setToast(t('toast.copyFailed')))
     }
   }
 
@@ -53,11 +55,13 @@ export default function SavedPage() {
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
         <div>
-          <h2 style={{ fontSize: '1.4rem', marginBottom: '4px' }}>Saved places</h2>
+          <h2 style={{ fontSize: '1.4rem', marginBottom: '4px' }}>{t('saved.title')}</h2>
           <p style={{ fontSize: '0.88rem', color: 'var(--text-muted)' }} aria-live="polite">
             {favorites.length === 0
-              ? 'Tap the heart on any result to save it here.'
-              : `${favorites.length} saved place${favorites.length === 1 ? '' : 's'}`}
+              ? t('saved.emptyBody')
+              : favorites.length === 1
+                ? t('saved.countOne')
+                : t('saved.countMany', { count: favorites.length })}
           </p>
         </div>
 
@@ -73,10 +77,9 @@ export default function SavedPage() {
             >
               <Heart size={26} />
             </div>
-            <h3 style={{ fontSize: '1.05rem', marginBottom: 6 }}>Nothing saved yet</h3>
+            <h3 style={{ fontSize: '1.05rem', marginBottom: 6 }}>{t('saved.emptyTitle')}</h3>
             <p style={{ fontSize: '0.88rem', color: 'var(--text-muted)', maxWidth: 320 }}>
-              Search for a place on Home and tap the heart icon — it will appear here,
-              even when you're offline.
+              {t('saved.emptyBodyOffline')}
             </p>
           </GlassCard>
         ) : (
@@ -94,8 +97,8 @@ export default function SavedPage() {
                 type="search"
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
-                placeholder="Search saved places — e.g. 'quiet cafe'"
-                aria-label="Search saved places"
+                placeholder={t('saved.searchPlaceholder')}
+                aria-label={t('saved.searchAria')}
                 style={{
                   width: '100%', padding: '10px 12px 10px 36px',
                   borderRadius: '12px', border: '1px solid var(--border)',
@@ -106,7 +109,7 @@ export default function SavedPage() {
             </div>
             {visibleFavorites.length === 0 && searchQuery.trim() !== '' && (
               <p style={{ fontSize: '0.88rem', color: 'var(--text-muted)' }}>
-                No saved places match “{searchQuery.trim()}”.
+                {t('saved.noMatch', { q: searchQuery.trim() })}
               </p>
             )}
             {visibleFavorites.map(place => (
@@ -163,6 +166,7 @@ interface ListsSectionProps {
 function ListsSection({
   lists, places, createList, removeFromList, setNote, deleteList, onOpenPlace,
 }: ListsSectionProps) {
+  const { t } = useLanguage()
   const [activeId, setActiveId] = useState<string>(DEFAULT_LIST_ID)
   const [draftName, setDraftName] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -183,13 +187,13 @@ function ListsSection({
 
   return (
     <GlassCard style={{ padding: '20px' }}>
-      <h3 style={{ fontSize: '1.05rem', marginBottom: '4px' }}>My lists</h3>
+      <h3 style={{ fontSize: '1.05rem', marginBottom: '4px' }}>{t('saved.listsTitle')}</h3>
       <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginBottom: '12px' }}>
-        Group saved places into lists and add notes to each one.
+        {t('saved.listsBody')}
       </p>
 
       {/* List tabs */}
-      <div role="tablist" aria-label="Saved lists" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '12px' }}>
+      <div role="tablist" aria-label={t('saved.listsAria')} style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '12px' }}>
         {lists.map(l => {
           const isActive = active?.id === l.id
           return (
@@ -211,11 +215,11 @@ function ListsSection({
       {/* Create a list */}
       <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '12px' }}>
         <input
-          aria-label="New list name"
+          aria-label={t('saved.newListAria')}
           value={draftName}
           onChange={e => setDraftName(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter') submitList() }}
-          placeholder="New list name — e.g. Weekend food"
+          placeholder={t('saved.newListPlaceholder')}
           style={{
             flex: 1, minWidth: 180,
             background: 'var(--input-bg)', border: '1px solid var(--input-border)',
@@ -224,7 +228,7 @@ function ListsSection({
           }}
         />
         <Button variant="ghost" onClick={submitList}>
-          <Plus size={15} /> New list
+          <Plus size={15} /> {t('saved.newList')}
         </Button>
       </div>
 
@@ -233,14 +237,14 @@ function ListsSection({
           <Button
             variant="ghost"
             onClick={() => {
-              if (window.confirm(`Delete the list "${active.name}"? Its notes will be removed.`)) {
+              if (window.confirm(t('saved.deleteConfirm', { name: active.name }))) {
                 deleteList(active.id)
                 setActiveId(DEFAULT_LIST_ID)
               }
             }}
             style={{ fontSize: '0.8rem', color: 'var(--error, #e5484d)' }}
           >
-            <Trash2 size={14} /> Delete list
+            <Trash2 size={14} /> {t('saved.deleteList')}
           </Button>
         </div>
       )}
@@ -249,8 +253,8 @@ function ListsSection({
       {members.length === 0 ? (
         <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
           {active?.id === DEFAULT_LIST_ID
-            ? 'Saved favorites appear here. Heart a place on Home to add it.'
-            : 'This list is empty. Heart a place on Home, then move it here from Favorites later — or add it from any place sheet.'}
+            ? t('saved.defaultListEmpty')
+            : t('saved.listEmpty')}
         </p>
       ) : (
         <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -279,13 +283,13 @@ function ListsSection({
                   </button>
                   <button
                     type="button"
-                    aria-label={`Remove ${place.name} from ${active?.name}`}
+                    aria-label={t('saved.removeFromList', { place: place.name, list: active?.name ?? '' })}
                     onClick={() => removeFromList(place.id, active!.id)}
                     style={{
                       background: 'none', border: 'none', cursor: 'pointer',
                       color: 'var(--text-muted)', padding: '4px',
                     }}
-                    title="Remove from list"
+                    title={t('saved.removeTitle')}
                   >
                     <X size={15} />
                   </button>
@@ -294,10 +298,10 @@ function ListsSection({
                 {isEditing ? (
                   <div style={{ display: 'flex', gap: '6px', marginTop: '8px' }}>
                     <input
-                      aria-label={`Note for ${place.name}`}
+                      aria-label={t('saved.noteAria', { name: place.name })}
                       value={noteDraft}
                       onChange={e => setNoteDraft(e.target.value)}
-                      placeholder="Add a note…"
+                      placeholder={t('saved.notePlaceholder')}
                       autoFocus
                       style={{
                         flex: 1, minWidth: 0,
@@ -310,7 +314,7 @@ function ListsSection({
                       variant="ghost"
                       onClick={() => { setNote(place.id, active!.id, noteDraft); setEditingId(null) }}
                       style={{ padding: '8px 10px' }}
-                      aria-label="Save note"
+                      aria-label={t('saved.saveNote')}
                     >
                       <Check size={15} />
                     </Button>
@@ -318,7 +322,7 @@ function ListsSection({
                       variant="ghost"
                       onClick={() => setEditingId(null)}
                       style={{ padding: '8px 10px' }}
-                      aria-label="Cancel"
+                      aria-label={t('saved.cancel')}
                     >
                       <X size={15} />
                     </Button>
@@ -335,7 +339,7 @@ function ListsSection({
                     }}
                   >
                     <Pencil size={13} />
-                    {note || 'Add a note'}
+                    {note || t('saved.addNote')}
                   </button>
                 )}
               </li>

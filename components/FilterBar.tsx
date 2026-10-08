@@ -2,6 +2,7 @@
 import Switch from './ui/switch'
 import Select from './ui/select'
 import type { SortKey } from './types'
+import { useLanguage } from '../hooks/useLanguage'
 
 export const RADIUS_OPTIONS = [1, 3, 5, 10]
 
@@ -33,6 +34,7 @@ export default function FilterBar({
   openNow, onOpenNowChange, sort, onSortChange, radiusKm, onRadiusChange,
   priceBand, onPriceBandChange,
 }: FilterBarProps) {
+  const { t } = useLanguage()
   return (
     <div
       style={{
@@ -41,7 +43,7 @@ export default function FilterBar({
         gap: '12px',
         flexWrap: 'wrap',
       }}
-      aria-label="Result filters"
+      aria-label={t('filters.aria')}
     >
       {/* Open now toggle */}
       <label
@@ -52,28 +54,28 @@ export default function FilterBar({
           cursor: 'pointer',
         }}
       >
-        <Switch id="open-now-toggle" checked={openNow} onCheckedChange={onOpenNowChange} label="Open now only" />
-        Open now
+        <Switch id="open-now-toggle" checked={openNow} onCheckedChange={onOpenNowChange} label={t('filters.openNowOnly')} />
+        {t('filters.openNow')}
       </label>
 
       {/* Sort */}
       <label style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-        Sort
+        {t('filters.sort')}
         <Select
-          aria-label="Sort results"
+          aria-label={t('filters.sortAria')}
           value={sort}
           onChange={e => onSortChange(e.target.value as SortKeyExt)}
         >
-          <option value="foryou">For you</option>
-          <option value="best">Best match</option>
-          <option value="nearest">Nearest</option>
-          <option value="rated">Top rated</option>
-          <option value="reviewed">Most reviewed</option>
+          <option value="foryou">{t('sort.foryou')}</option>
+          <option value="best">{t('sort.best')}</option>
+          <option value="nearest">{t('sort.nearest')}</option>
+          <option value="rated">{t('sort.rated')}</option>
+          <option value="reviewed">{t('sort.reviewed')}</option>
         </Select>
       </label>
 
       {/* Price */}
-      <div role="group" aria-label="Price range" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+      <div role="group" aria-label={t('filters.priceAria')} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
         {PRICE_BANDS.map(b => {
           const active = priceBand === b
           return (
@@ -82,18 +84,18 @@ export default function FilterBar({
               type="button"
               onClick={() => onPriceBandChange(b)}
               aria-pressed={active}
-              aria-label={b === 'any' ? 'Any price' : b === '₹₹₹+' ? 'Price ₹₹₹ and above' : `Price ${b}`}
+              aria-label={b === 'any' ? t('filters.anyPriceAria') : b === '₹₹₹+' ? t('filters.priceHigh') : t('filters.priceBand', { band: b })}
               className={active ? 'chip chip-green' : 'chip chip-muted'}
               style={{ cursor: 'pointer', fontFamily: "'Satoshi', sans-serif", padding: '7px 13px' }}
             >
-              {b === 'any' ? 'Any' : b}
+              {b === 'any' ? t('filters.anyPrice') : b}
             </button>
           )
         })}
       </div>
 
       {/* Radius */}
-      <div role="group" aria-label="Search radius" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+      <div role="group" aria-label={t('filters.radiusAria')} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
         {RADIUS_OPTIONS.map(r => {
           const active = radiusKm === r
           return (
@@ -105,7 +107,7 @@ export default function FilterBar({
               className={active ? 'chip chip-green' : 'chip chip-muted'}
               style={{ cursor: 'pointer', fontFamily: "'Satoshi', sans-serif", padding: '7px 13px' }}
             >
-              {r} km
+              {t('filters.radiusUnit', { n: r })}
             </button>
           )
         })}

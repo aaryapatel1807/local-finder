@@ -20,6 +20,42 @@ distance and directions. One screen, one input, results in under three seconds.
 - **Dark mode**: follows system preference, with a manual toggle
 - **AI layer (optional)**: messy-query parsing ("cheap veg place open late near station" → structured filters) and two-line review summaries with pros/cons — via Groq free tier; the app works fully without it
 
+## Phase 2 features
+
+- **Smart query understanding**: word-sense disambiguation ("apple" → store vs juice shop) with one-tap
+  "Did you mean…" chips; typo and transliteration tolerance ("pharmasy", "davakhana"); Hindi/Gujarati
+  queries translated to English before searching — all in the existing `/api/parse` call, no extra SerpApi cost
+- **"Near <landmark>" anchoring**: "near railway station" is geocoded (free Photon API, no key, 7-day cache)
+  and the search recenters there
+- **Conversational answers**: question-style queries ("where can I get medicine at 2am?") return an answer
+  card with the top pick and 1–2 sentence reasons (`POST /api/answer`); hidden gracefully without a Groq key
+- **Precise location**: GPS refinement (keeps the most accurate fix, shows a "±25 m" badge), a
+  drag-the-pin "Set on map" mode (persisted), and a geocoded city text input instead of hardcoded cities
+- **Walk/drive times** on every card via the free OSRM router (24h cache), with a haversine fallback
+  marked "~" when OSRM is unreachable — lazy-loaded, never blocks rendering
+- **Real open-now**: computed from weekly hours + current time (handles overnight hours), with an amber
+  "Closes in X min" countdown where the data allows
+- **Hidden-gem badges**: top-quartile Bayesian rating with <100 reviews
+- **Review intelligence**: "good for" tags (late-night, family-friendly, budget…), best-time-to-visit hints,
+  and review sentiment blended into the best-match score — all from the same Groq reviews call, zero extra cost
+- **Ask about this place**: Q&A box in the details sheet answers from the fetched reviews only
+  (prompt-injection guardrails), cached per place + question
+- **Tap-to-load photo gallery** via SerpApi `google_maps_photos` — quota-guarded (hidden near the plan limit),
+  24h cache, never auto-fetched
+- **"For you" ranking**: a tiny on-device learner (perceptron-style, localStorage, zero server calls) reweights
+  rating/distance/open/sentiment from your taps and saves; auto-suggests itself after 10+ interactions and
+  learns your usual radius/sort as smart defaults
+- **Semantic saved search**: "somewhere quiet to study" matches saved cafes by name/category text —
+  pure TypeScript, no model downloads
+- **Errand planner**: "pharmacy, ATM, groceries" → nearest option per category, ordered into a short walking loop
+- **Meet in the middle**: two locations (pin or text) → searches around the geographic midpoint
+- **Saved lists**: organize favorites into named lists with per-place notes
+- **Compare up to 3 places** side by side (rating, reviews, distance, walk time, price, hours)
+- **Price filter** (₹–₹₹₹), **late-night emergency mode** (open pharmacies/clinics/petrol, nearest first),
+  **Surprise me**, **voice search** (Web Speech API), **WhatsApp share**, **recently viewed**
+- **EN / हिं / ગુ UI toggle** (persisted) and **installable PWA** (offline app shell + saved places)
+- **Quota meter**: "N searches used this month" from `/api/health`
+
 ## Tech stack
 
 - **Next.js 14** (App Router) + **TypeScript** + **Tailwind CSS**
@@ -89,8 +125,10 @@ npm start        # serve the production build
 npm test         # vitest run — unit + API tests
 ```
 
-Current suite: 62 tests across `lib/` (openState, distance, score, normalize, ai) and the
-`/api/search` route (mock mode, shape checks, 400/429 handling) — all green.
+Current suite: 190+ tests across `lib/` (openState incl. real open-now + countdown, distance, score incl.
+sentiment blend + hidden-gem rule, normalize incl. dedupe, ai incl. disambiguation/tags/sentiment,
+learner, semantic, errands, geocode, i18n dictionary) and the API routes
+(`/api/search`, `/api/route`, `/api/ask`, `/api/photos` — mock mode, shape checks, 400/429/503 handling) — all green.
 
 Type check: `npx tsc --noEmit`.
 
@@ -135,8 +173,13 @@ prisma/schema.prisma    # User / Favorite / Search models (DB optional)
 | --- | --- | --- |
 | `POST /api/search` | `{ query, lat, lng, radiusKm: 1\|3\|5\|10 }` | `{ cached, count, places: Place[], mock? }` |
 | `GET /api/place/[id]` | — | `{ place: Place }` or `404 NOT_FOUND` |
-| `POST /api/reviews` | `{ dataId, placeName }` | `{ summary, pros[], cons[], basedOn, cached, mock?, aiDisabled? }` (`summary` may be empty → hide the AI section) |
-| `POST /api/parse` | `{ text }` | `{ parsed: { query, openNow, priceMax?, near?, sort } \| null, aiDisabled?, fallbackQuery? }` |
+| `POST /api/reviews` | `{ dataId, placeName }` | `{ summary, pros[], cons[], basedOn, tags[], sentiment (-1..1), bestTimeHint?, cached, mock?, aiDisabled? }` (`summary` may be empty → hide the AI section) |
+| `POST /api/parse` | `{ text }` | `{ parsed: { query, openNow, priceMax?, near?, sort, ambiguous?: { term, options: [{label, query}] }, detectedLang? } \| null, aiDisabled?, fallbackQuery? }` |
+| `GET /api/geocode?q=` | — | `{ lat, lng, label }` or `404 NO_RESULTS` (Photon, free, 7-day cache) |
+| `GET /api/route?from=lat,lng&to=lat,lng&mode=walk\|drive` | — | `{ durationMin, distanceKm, mode, estimated }` (`estimated: true` = haversine fallback when OSRM is down; 24h cache, estimates never cached) |
+| `POST /api/answer` | `{ text, lat, lng, radiusKm }` | `{ answer: { place, reasons[], summary } \| null, query, cached, aiDisabled? }` (null → show normal results) |
+| `POST /api/ask` | `{ dataId?, placeName, question }` | `{ answer: string \| null, basedOn }` (answered from reviews only; 24h cache) |
+| `GET /api/photos?dataId=` | — | `{ photos: [{url}] }` — 503 `QUOTA_NEAR_LIMIT` when ≥90% of the monthly quota is used (section hidden); 24h cache |
 | `GET /api/favorites` | — | `{ localOnly, favorites? }` (`localOnly: true` when no DB — frontend uses localStorage) |
 | `POST /api/favorites` | `{ place }` | `{ localOnly?, favorite }` |
 | `DELETE /api/favorites?id=` | — | `{ localOnly?, deleted, id }` |
@@ -145,7 +188,7 @@ prisma/schema.prisma    # User / Favorite / Search models (DB optional)
 Error shape: `{ error: { code, message } }` with HTTP status.
 Codes: `INVALID_INPUT` (400), `RATE_LIMITED` (429), `QUOTA_EXCEEDED` (503), `UPSTREAM_ERROR` (502), `NOT_FOUND` (404).
 
-`Place` (spec 7.4): `id, dataId?, name, category?, rating?, reviews?, price?, address?, phone?, website?, openLabel?, isOpen (bool|null), closesSoon, hoursToday?, weeklyHours?, lat, lng, distanceKm?, thumbnail?, score? (0–100 best-match)`.
+`Place` (spec 7.4): `id, dataId?, name, category?, rating?, reviews?, price?, address?, phone?, website?, openLabel?, isOpen (bool|null), closesSoon, minutesToClose?, hoursToday?, weeklyHours?, lat, lng, distanceKm?, thumbnail?, score? (0–100 best-match)`.
 
 ## Privacy
 

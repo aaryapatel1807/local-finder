@@ -2,6 +2,11 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 export type GeoStatus = 'idle' | 'loading' | 'granted' | 'denied'
 
+/** Machine-readable geolocation failure keys — each resolves to a
+ *  dictionary entry (geo.denied / geo.unavailable / geo.unsupported)
+ *  when rendered through t(). */
+export type GeoErrorKey = 'geo.denied' | 'geo.unavailable' | 'geo.unsupported'
+
 export interface Coords {
   lat: number
   lng: number
@@ -27,13 +32,14 @@ export const GEO_REFINEMENT_MS = 5000
  * Browser geolocation with watchPosition refinement: collects fixes for up
  * to GEO_REFINEMENT_MS with enableHighAccuracy, keeps the fix with the
  * lowest coords.accuracy, and exposes it as accuracyMeters. Stops watching
- * on lock/timeout. Return shape stays {coords, status, error,
+ * on lock/timeout. Return shape stays {coords, status, error, errorKey,
  * requestLocation, setCoords} compatible.
  */
 export function useGeolocation() {
   const [coords, setCoords] = useState<Coords | null>(null)
   const [status, setStatus] = useState<GeoStatus>('idle')
   const [error, setError] = useState<string | null>(null)
+  const [errorKey, setErrorKey] = useState<GeoErrorKey | null>(null)
   const [accuracyMeters, setAccuracyMeters] = useState<number | null>(null)
   const watchRef = useRef<number | null>(null)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -56,11 +62,13 @@ export function useGeolocation() {
     if (typeof navigator === 'undefined' || !navigator.geolocation) {
       setStatus('denied')
       setError('Geolocation is not supported in this browser.')
+      setErrorKey('geo.unsupported')
       return
     }
     stopWatching()
     setStatus('loading')
     setError(null)
+    setErrorKey(null)
     setAccuracyMeters(null)
 
     let best: { lat: number; lng: number; accuracy: number } | null = null
@@ -74,6 +82,7 @@ export function useGeolocation() {
       } else {
         setStatus('denied')
         setError('Could not get your location. Type a city below or set it on the map.')
+        setErrorKey('geo.unavailable')
       }
     }
 
@@ -98,6 +107,7 @@ export function useGeolocation() {
           stopWatching()
           setStatus('denied')
           setError('Location permission denied. Type a city below or set it on the map.')
+          setErrorKey('geo.denied')
         }
       },
       { enableHighAccuracy: true, timeout: GEO_REFINEMENT_MS, maximumAge: 0 }
@@ -105,5 +115,5 @@ export function useGeolocation() {
     timerRef.current = setTimeout(finish, GEO_REFINEMENT_MS)
   }, [stopWatching])
 
-  return { coords, status, error, requestLocation, setCoords, accuracyMeters }
+  return { coords, status, error, errorKey, requestLocation, setCoords, accuracyMeters }
 }

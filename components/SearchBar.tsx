@@ -2,6 +2,7 @@
 import { FormEvent, useEffect, useRef, useState } from 'react'
 import { Mic, Search, Sparkles, X } from 'lucide-react'
 import Button from './ui/button'
+import { useLanguage } from '../hooks/useLanguage'
 
 /** Minimal structural type for the Web Speech API recognition object. */
 interface WebkitSpeechRecognitionLike {
@@ -34,6 +35,7 @@ interface SearchBarProps {
 export default function SearchBar({
   value, onChange, onSubmit, aiDisabled, onParse, parsing, recentSearches, onRecentSelect,
 }: SearchBarProps) {
+  const { t } = useLanguage()
   const [focused, setFocused] = useState(false)
   const [listening, setListening] = useState(false)
   const [speechSupported, setSpeechSupported] = useState(false)
@@ -99,7 +101,7 @@ export default function SearchBar({
       <form
         onSubmit={submit}
         role="search"
-        aria-label="Search places"
+        aria-label={t('search.aria')}
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -121,8 +123,8 @@ export default function SearchBar({
           onChange={e => onChange(e.target.value)}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
-          placeholder="Search places — e.g. pharmacy, chai…"
-          aria-label="Search places"
+          placeholder={t('search.placeholder')}
+          aria-label={t('search.aria')}
           enterKeyHint="search"
           style={{
             flex: 1,
@@ -140,7 +142,7 @@ export default function SearchBar({
           <button
             type="button"
             onClick={() => onChange('')}
-            aria-label="Clear search"
+            aria-label={t('search.clear')}
             style={{
               background: 'var(--track)',
               border: 'none',
@@ -157,9 +159,9 @@ export default function SearchBar({
           <button
             type="button"
             onClick={toggleListening}
-            aria-label={listening ? 'Stop voice input' : 'Search by voice'}
+            aria-label={t(listening ? 'search.stopVoice' : 'search.voice')}
             aria-pressed={listening}
-            title="Search by voice"
+            title={t('search.voice')}
             style={{
               background: listening ? 'rgba(217,119,6,0.18)' : 'transparent',
               border: 'none',
@@ -178,8 +180,8 @@ export default function SearchBar({
             type="button"
             onClick={() => value.trim() && onParse(value.trim())}
             disabled={!value.trim() || parsing}
-            aria-label="Parse with AI"
-            title="Understand my query with AI"
+            aria-label={t('search.aiParse')}
+            title={t('search.aiParseTitle')}
             style={{
               background: 'transparent',
               border: 'none',
@@ -199,12 +201,12 @@ export default function SearchBar({
           disabled={!value.trim()}
           style={{ borderRadius: '20px', padding: '10px 20px' }}
         >
-          Go
+          {t('search.go')}
         </Button>
       </form>
 
       {recentSearches.length > 0 && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '10px' }} aria-label="Recent searches">
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '10px' }} aria-label={t('search.recentAria')}>
           {recentSearches.map(q => (
             <button
               key={q}

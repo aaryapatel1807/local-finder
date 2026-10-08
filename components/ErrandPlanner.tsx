@@ -6,6 +6,7 @@ import Button from './ui/button'
 import { parseErrandInput, orderStopsNearestNeighbor, ERRAND_MAX_CATEGORIES } from '../lib/errands'
 import { haversineKm } from '../lib/distance'
 import type { Place, SearchResponse } from './types'
+import { useLanguage } from '../hooks/useLanguage'
 
 interface Props {
   coords: { lat: number; lng: number } | null
@@ -61,6 +62,7 @@ function fmtMins(mins: number): string {
 }
 
 export default function ErrandPlanner({ coords }: Props) {
+  const { t } = useLanguage()
   const [input, setInput] = useState('')
   const [phase, setPhase] = useState<'idle' | 'searching' | 'routing'>('idle')
   const [phaseNote, setPhaseNote] = useState('')
@@ -73,7 +75,7 @@ export default function ErrandPlanner({ coords }: Props) {
     if (!coords) return
     const categories = parseErrandInput(input)
     if (categories.length === 0) {
-      setError('Type at least one errand — e.g. pharmacy, ATM, groceries')
+      setError(t('errand.empty'))
       return
     }
     setError(null)
@@ -86,7 +88,7 @@ export default function ErrandPlanner({ coords }: Props) {
     const found: { place: Place; category: string }[] = []
     const skipped: string[] = []
     for (const category of categories) {
-      setPhaseNote(`Searching ${category}…`)
+      setPhaseNote(t('errand.searching', { category }))
       try {
         const res = await fetch('/api/search', {
           method: 'POST',
@@ -113,13 +115,13 @@ export default function ErrandPlanner({ coords }: Props) {
       setPhase('idle')
       setPhaseNote('')
       setNotes(skipped.map(c => `No results for "${c}" — skipped.`))
-      setError('Nothing to plan — none of the categories returned results nearby.')
+      setError(t('errand.noResults'))
       return
     }
 
     // Phase 2: order stops, then fetch each walking leg.
     setPhase('routing')
-    setPhaseNote('Planning the walking route…')
+    setPhaseNote(t('errand.routingNote'))
     const ordered = orderStopsNearestNeighbor(
       found.map(f => ({ id: f.place.id, lat: f.place.lat, lng: f.place.lng })),
       coords
@@ -144,7 +146,7 @@ export default function ErrandPlanner({ coords }: Props) {
     setTotalMins(planned.reduce((sum, s) => sum + s.walkMins, 0))
     setNotes([
       ...skipped.map(c => `No results for "${c}" — skipped.`),
-      ...(planned.some(s => s.estimated) ? ['Some walk times are estimates (routing service unavailable).'] : []),
+      ...(planned.some(s => s.estimated) ? [t('errand.estimatesNote')] : []),
     ])
     setPhase('idle')
     setPhaseNote('')
@@ -156,7 +158,7 @@ export default function ErrandPlanner({ coords }: Props) {
     <GlassCard style={{ padding: '20px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
         <RouteIcon size={18} color="var(--accent)" />
-        <h3 style={{ fontSize: '1.05rem' }}>Errand planner</h3>
+        <h3 style={{ fontSize: '1.05rem' }}>{t('errand.title')}</h3>
       </div>
       <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginBottom: '12px' }}>
         List up to {ERRAND_MAX_CATEGORIES} stops and I'll order them into the shortest
@@ -166,11 +168,11 @@ export default function ErrandPlanner({ coords }: Props) {
 
       <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
         <input
-          aria-label="Errands to run"
+          aria-label={t('errand.inputAria')}
           value={input}
           onChange={e => setInput(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter') plan() }}
-          placeholder="pharmacy, ATM, groceries"
+          placeholder={t('errand.placeholder')}
           disabled={busy}
           style={{
             flex: 1, minWidth: 180,
@@ -181,12 +183,12 @@ export default function ErrandPlanner({ coords }: Props) {
         />
         <Button variant="primary" onClick={plan} disabled={busy || !coords}>
           {busy ? <Loader2 size={16} style={{ animation: 'spin-slow 1.2s linear infinite' }} /> : null}
-          {busy ? 'Planning…' : 'Plan route'}
+          {busy ? t('errand.planning') : t('errand.plan')}
         </Button>
       </div>
       {!coords && (
         <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '8px' }}>
-          Enable location to plan an errand route.
+          {t('errand.needLocation')}
         </p>
       )}
       {busy && phaseNote && (
@@ -233,7 +235,7 @@ export default function ErrandPlanner({ coords }: Props) {
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '6px', fontSize: '0.82rem', color: 'var(--text-primary)' }}>
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                      <Footprints size={14} /> {s.estimated ? '~' : ''}{fmtMins(s.walkMins)} walk
+                      <Footprints size={14} /> {s.estimated ? '~' : ''}{fmtMins(s.walkMins)} {t('errand.walkSuffix')}
                     </span>
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: 'var(--text-muted)' }}>
                       <MapPin size={14} /> {s.legKm.toFixed(1)} km
@@ -245,7 +247,7 @@ export default function ErrandPlanner({ coords }: Props) {
           </ol>
           {totalMins !== null && (
             <p style={{ fontSize: '0.9rem', fontWeight: 700, color: 'var(--text-primary)' }}>
-              Total walking time: {stops.some(s => s.estimated) ? '~' : ''}{fmtMins(totalMins)} for {stops.length} stop{stops.length === 1 ? '' : 's'}
+              {t('errand.total', { time: `${stops.some(s => s.estimated) ? '~' : ''}${fmtMins(totalMins)}`, count: stops.length })}
             </p>
           )}
         </div>
