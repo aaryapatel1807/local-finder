@@ -109,3 +109,29 @@ export function blendSentiment(score: number, sentiment?: number): number {
   const clamped = Math.max(-1, Math.min(1, sentiment));
   return round1(Math.max(0, Math.min(100, score + clamped * 5)));
 }
+
+/**
+ * Hidden-gem rule (Phase 2): flags places whose Bayesian average rating is
+ * in the top quartile of the result set but which have fewer than 100
+ * reviews — highly rated, under-discovered places. Returns their ids.
+ * Empty set when there are fewer than 4 places.
+ */
+export function hiddenGemIdSet(
+  places: { id: string; rating?: number; reviews?: number }[]
+): Set<string> {
+  const ids = new Set<string>();
+  if (places.length < 4) return ids;
+  const mean = meanRatingOf(places);
+  const scored = places
+    .map((p) => ({
+      id: p.id,
+      b: bayesianAverage(p.rating, p.reviews, mean),
+      r: p.reviews ?? 0,
+    }))
+    .sort((x, y) => y.b - x.b);
+  const cutoff = scored[Math.ceil(scored.length / 4) - 1].b;
+  for (const s of scored) {
+    if (s.b >= cutoff && s.r < 100) ids.add(s.id);
+  }
+  return ids;
+}

@@ -18,17 +18,20 @@ import Toast from '../components/Toast'
 import AmbiguityChips from '../components/AmbiguityChips'
 import AnswerCard from '../components/AnswerCard'
 import CompareTable from '../components/CompareTable'
+import ErrandPlanner from '../components/ErrandPlanner'
+import MeetInMiddle from '../components/MeetInMiddle'
 import LocationPicker, { PINNED_STORAGE_KEY } from '../components/LocationPicker'
 import Button from '../components/ui/button'
 import { useGeolocation, CITY_FALLBACKS, type CityOption, type Coords } from '../hooks/useGeolocation'
 import { useSearch } from '../hooks/useSearch'
 import { useFavorites } from '../hooks/useFavorites'
 import { useHealth } from '../hooks/useHealth'
+import { usePersonalRank } from '../hooks/usePersonalRank'
 import { useLocalStorage } from '../hooks/useLocalStorage'
 import type { Place, ParseResponse, ParsedQueryResult } from '../components/types'
 import { mapParseSort, sortPlaces, formatDistance } from '../components/types'
 import { isQuestionLike } from '../lib/question'
-import { bayesianAverage, blendSentiment, meanRatingOf } from '../lib/score'
+import { blendSentiment, hiddenGemIdSet } from '../lib/score'
 
 /**
  * CONTRACT NOTE: components/types.ts carries the Phase 2 fields
@@ -83,6 +86,8 @@ function HomeContent() {
     coords, status: geoStatus, error: geoError, requestLocation, setCoords, accuracyMeters,
   } = useGeolocation()
   const { favorites, isFavorite, toggle } = useFavorites()
+  // On-device personal ranking: learns from taps/saves, zero server calls.
+  const { logInteraction, rerankForYou, suggestForYou, smartDefaults } = usePersonalRank()
   // The sibling's /api/health does not carry an aiDisabled flag; the AI routes
   // report it per-call instead, so we learn it lazily and hide AI UI after.
   const [aiDisabled, setAiDisabled] = useState(false)
@@ -242,8 +247,16 @@ function HomeContent() {
     let places = search.data?.places ?? []
     if (openNow) places = places.filter(p => p.isOpen === true)
     if (priceBand !== 'any') places = places.filter(p => matchesPriceBand(p.price, priceBand))
-    if (sort === 'best' || sort === 'foryou') {
-      // 'foryou' behaves like 'best' until the personalized rerank hook lands.
+    if (sort === 'foryou') {
+      // Personalized on-device rerank (weights learned from taps/saves).
+      // Sentiment (when known from loaded reviews) flows in as a feature.
+      const enriched = places.map(p => ({
+        ...p,
+        sentiment: sentimentCacheRef.current.get(p.id),
+      }))
+      return rerankForYou(enriched, radiusKm)
+    }
+    if (sort === 'best') {
       const scored = places.map(p => ({
         p,
         s: blendSentiment(p.score ?? 0, sentimentCacheRef.current.get(p.id)),
@@ -252,7 +265,7 @@ function HomeContent() {
       return scored.slice(0, 20).map(x => x.p)
     }
     return sortPlaces(places, sort)
-  }, [search.data, openNow, sort, priceBand, sentimentTick])
+  }, [search.data, openNow, sort, priceBand, sentimentTick, radiusKm, rerankForYou])
 
   // Sentiment from loaded review summaries feeds the best-sort blend.
   const handleReviewsLoaded = useCallback((placeId: string, sentiment?: number) => {
@@ -262,6 +275,65 @@ function HomeContent() {
       setSentimentTick(t => t + 1)
     }
   }, [])
+
+  // ── Personal ranking: smart defaults (applied once, only when the user
+  // hasn't expressed a choice yet) + interaction logging ──────────────────
+  const [defaultsApplied, setDefaultsApplied] = useState(false)
+  useEffect(() => {
+    if (defaultsApplied) return
+    let changed = false
+    if (smartDefaults.radiusKm !== undefined && radiusKm !== smartDefaults.radiusKm) {
+      setRadiusKm(smartDefaults.radiusKm)
+      changed = true
+    }
+    if (smartDefaults.sort !== undefined && sort !== smartDefaults.sort) {
+      setSort(smartDefaults.sort as SortKeyExt)
+      changed = true
+    }
+    if (changed) setDefaultsApplied(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [defaultsApplied])
+
+  const forYouToastShown = useRef(false)
+  useEffect(() => {
+    if (suggestForYou && !forYouToastShown.current) {
+      forYouToastShown.current = true
+      showToast('Try "For you" sort — personalized to your picks')
+    }
+  }, [suggestForYou, showToast])
+
+  const handleCardOpen = useCallback((place: Place | null) => {
+    if (place) {
+      const shownRank = results.findIndex(p => p.id === place.id)
+      logInteraction('tap', place, {
+        radiusKm,
+        shownRank: Math.max(0, shownRank),
+        shownTopPlace: results[0] ?? place,
+        sort,
+      })
+    }
+    setSelectedPlace(place)
+  }, [results, radiusKm, sort, logInteraction])
+
+  const handleToggleFavorite = useCallback((place: Place) => {
+    const shownRank = results.findIndex(p => p.id === place.id)
+    if (shownRank >= 0) {
+      logInteraction('save', place, {
+        radiusKm,
+        shownRank,
+        shownTopPlace: results[0] ?? place,
+        sort,
+      })
+    }
+    toggle(place)
+  }, [results, radiusKm, sort, toggle, logInteraction])
+
+  // ── Meet in the middle: a midpoint becomes the search location ───────────
+  const handleMeet = useCallback((c: { lat: number; lng: number }, label: string) => {
+    setCoords(c)
+    setLocationLabel(label)
+    showToast('Searching around ' + label)
+  }, [setCoords, setLocationLabel, showToast])
 
   // Match the answer card's place back to a result for "View details".
   const answerPlaceMatch = useMemo(() => {
@@ -276,19 +348,7 @@ function HomeContent() {
   }, [answer, results])
 
   // ── Hidden gems: top-quartile Bayesian rating with <100 reviews ────────────
-  const hiddenGemIds = useMemo(() => {
-    const ids = new Set<string>()
-    if (results.length < 4) return ids
-    const mean = meanRatingOf(results)
-    const scored = results
-      .map(p => ({ id: p.id, b: bayesianAverage(p.rating, p.reviews, mean), r: p.reviews ?? 0 }))
-      .sort((x, y) => y.b - x.b)
-    const cutoff = scored[Math.ceil(scored.length / 4) - 1].b
-    for (const s of scored) {
-      if (s.b >= cutoff && s.r < 100) ids.add(s.id)
-    }
-    return ids
-  }, [results])
+  const hiddenGemIds = useMemo(() => hiddenGemIdSet(results), [results])
 
   // ── Surprise me ──────────────────────────────────────────────────────────
   const openCount = useMemo(() => results.filter(p => p.isOpen === true).length, [results])
@@ -573,6 +633,10 @@ function HomeContent() {
           onPriceBandChange={setPriceBand}
         />
 
+        {/* Errand planner + meet in the middle */}
+        <ErrandPlanner coords={coords} />
+        <MeetInMiddle myCoords={coords} onMeet={handleMeet} />
+
         {/* Location status (accuracy badge + set on map) */}
         {geoStatus !== 'denied' && (
           <div
@@ -789,8 +853,8 @@ function HomeContent() {
                 <PlaceCard
                   place={place}
                   isFavorite={isFavorite(place.id)}
-                  onToggleFavorite={toggle}
-                  onOpen={setSelectedPlace}
+                  onToggleFavorite={handleToggleFavorite}
+                  onOpen={handleCardOpen}
                   highlighted={highlightId === place.id}
                   userCoords={coords}
                   selectable={compareMode}
@@ -917,7 +981,7 @@ function HomeContent() {
         place={selectedPlace}
         onClose={() => setSelectedPlace(null)}
         isFavorite={selectedPlace ? isFavorite(selectedPlace.id) : false}
-        onToggleFavorite={toggle}
+        onToggleFavorite={handleToggleFavorite}
         onShare={shareSearch}
         aiDisabled={aiDisabled}
         onAiDisabled={() => setAiDisabled(true)}
