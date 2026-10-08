@@ -1,34 +1,46 @@
 /**
  * The /api/search pipeline, extracted so /api/answer can reuse it.
  *
- * Lifecycle (spec 7.2):
- *  1. Normalize the query -> cache lookup (10 min TTL) -> { cached: true }.
- *  2. Miss: mock file (USE_MOCK=true, default) or SerpApi -> normalize ->
- *     drop permanently-closed -> dedupe -> distance + best-match score ->
- *     sort -> cap 20.
- *  3. Store in cache, best-effort DB log, return { cached: false, ... }.
+ * Quota-minimal architecture — three tiers:
+ *   1. SerpApi (rich: ratings/reviews/photos) — primary when a key is
+ *      present and quota is healthy. ONE call per search, cached 60 min,
+ *      keyed by canonicalKey so "davakhana" and "pharmacy" share it.
+ *   2. OSM Overpass (free, factual, no key, no quota) — fallback when
+ *      there is no SERPAPI_KEY, quota is exhausted/near-limit, SerpApi
+ *      errors, or SerpApi returns zero results (then merged + deduped).
+ *      Cached 24h in a separate `osm:` namespace.
+ *   3. AI (Groq free tier) — everything language-related; never a source
+ *      of place facts (see /api/answer's quota-exhausted path).
  *
- * Mock-mode searches never touch SerpApi and never increment the quota
- * counter. The API key never leaves the server.
+ * Mock mode (USE_MOCK=true, default) is unchanged: mock file only, no
+ * SerpApi calls, no quota counting.
  *
  * Throws SerpApiError on upstream failure (callers map QUOTA_EXCEEDED ->
- * 503, everything else -> 502).
+ * 503, everything else -> 502). The API key never leaves the server.
  */
 
 import { readFile } from "fs/promises";
 import path from "path";
 import { type Place } from "./schemas";
 import { cacheGet, cacheSet, searchCacheKey } from "./cache";
+import { canonicalKey } from "./canonical";
 import {
   dedupePlaces,
   normalizePlace,
   type SerpApiLocalResult,
 } from "./normalize";
+import {
+  normalizeOsmElement,
+  searchOsmElements,
+  type OsmOrigin,
+} from "./osm";
 import { meanRatingOf, scorePlace } from "./score";
 import { searchPlaces as serpapiSearchPlaces, SerpApiError } from "./serpapi";
+import { isQuotaExceeded, isQuotaNearLimit } from "./usage";
 import { db } from "./db";
 
-export const SEARCH_CACHE_TTL_SEC = 10 * 60;
+export const SEARCH_CACHE_TTL_SEC = 60 * 60; // 60 min (was 10)
+export const OSM_CACHE_TTL_SEC = 24 * 60 * 60; // 24h
 export const MAX_RESULTS = 20;
 
 /** Words that carry no matching signal in mock mode. */
@@ -44,10 +56,16 @@ export type SearchPipelineInput = {
   radiusKm: number;
 };
 
+export type SearchFallback = "osm";
+
 export type SearchPipelineResult = {
   places: Place[];
   cached: boolean;
   mock: boolean;
+  /** Canonical English key the search (and cache key) was built from. */
+  canonicalKey: string;
+  /** Set when results came from the OSM fallback tier. */
+  fallback?: SearchFallback;
 };
 
 function useMock(): boolean {
@@ -119,6 +137,115 @@ function logSearch(input: {
   })();
 }
 
+/** Normalize raw SerpApi items (drops permanently-closed). */
+function normalizeSerpApiItems(
+  rawItems: SerpApiLocalResult[],
+  origin: OsmOrigin,
+  now: Date = new Date()
+): Place[] {
+  const out: Place[] = [];
+  for (const item of rawItems) {
+    const place = normalizePlace(item, origin, now);
+    if (place) out.push(place);
+  }
+  return out;
+}
+
+/**
+ * OSM fallback tier with its own 24h cache namespace. Never throws:
+ * Overpass failure -> [] (the caller decides error vs empty result).
+ */
+async function searchOsmCached(
+  canonical: string,
+  lat: number,
+  lng: number,
+  radiusKm: number,
+  origin: OsmOrigin
+): Promise<Place[]> {
+  const key = `osm:${canonical}:${lat.toFixed(3)}:${lng.toFixed(3)}:${radiusKm}`;
+  const hit = await cacheGet<Place[]>(key);
+  if (hit) return hit;
+
+  let places: Place[] = [];
+  try {
+    const elements = await searchOsmElements(canonical, lat, lng, radiusKm);
+    for (const el of elements) {
+      const p = normalizeOsmElement(el, origin);
+      if (p) places.push(p);
+    }
+  } catch {
+    places = []; // best-effort tier: failure is not fatal
+  }
+  await cacheSet(key, places, OSM_CACHE_TTL_SEC);
+  return places;
+}
+
+/**
+ * Live-mode fetch with tier routing. Returns normalized places plus an
+ * optional fallback flag. Throws SerpApiError when nothing can serve the
+ * request (quota exhausted with no OSM data -> 503; total upstream
+ * failure -> 502).
+ */
+async function fetchLive(
+  canonical: string,
+  lat: number,
+  lng: number,
+  radiusKm: number,
+  origin: OsmOrigin
+): Promise<{ places: Place[]; fallback?: SearchFallback }> {
+  const apiKey = process.env.SERPAPI_KEY;
+  const quotaExceeded = await isQuotaExceeded();
+  const quotaNear = await isQuotaNearLimit(0.9);
+  const serpApiUsable = Boolean(apiKey) && !quotaExceeded && !quotaNear;
+
+  let serpPlaces: Place[] = [];
+  let serpError: unknown = null;
+
+  if (serpApiUsable) {
+    try {
+      const raw = await serpapiSearchPlaces({
+        q: canonical,
+        lat,
+        lng,
+        radiusKm,
+        apiKey: apiKey as string,
+      });
+      serpPlaces = normalizeSerpApiItems(raw as SerpApiLocalResult[], origin);
+    } catch (err) {
+      serpError = err;
+    }
+  }
+
+  if (serpPlaces.length > 0) {
+    return { places: serpPlaces };
+  }
+
+  // Fallback tier: OSM. Reached when there is no key, quota is
+  // exhausted/near-limit, SerpApi errored, or SerpApi returned zero
+  // results (then merged with the empty SerpApi set and deduped).
+  const osmPlaces = await searchOsmCached(canonical, lat, lng, radiusKm, origin);
+  const merged = dedupePlaces([...serpPlaces, ...osmPlaces]);
+  if (merged.length > 0) {
+    return { places: merged, fallback: "osm" };
+  }
+
+  if (serpError instanceof SerpApiError) throw serpError; // preserves QUOTA_EXCEEDED -> 503
+  if (quotaExceeded) {
+    throw new SerpApiError(
+      "QUOTA_EXCEEDED",
+      "Monthly SerpApi call limit reached"
+    );
+  }
+  if (serpError) {
+    throw new SerpApiError(
+      "UPSTREAM_ERROR",
+      serpError instanceof Error ? serpError.message : "Search failed"
+    );
+  }
+  // No key + OSM empty: honest empty result, not an error.
+  return { places: [], fallback: "osm" };
+}
+
 /**
  * Run the full search pipeline: cache -> fetch -> normalize -> dedupe ->
  * score -> sort -> cap. Throws SerpApiError on upstream failure.
@@ -128,58 +255,53 @@ export async function searchPlaces(
 ): Promise<SearchPipelineResult> {
   const { query, lat, lng, radiusKm } = input;
 
-  const normalizedQuery = query.trim().toLowerCase().replace(/\s+/g, " ");
-  const key = searchCacheKey(normalizedQuery, lat, lng, radiusKm);
+  // Canonical key: "davakhana" and "pharmacy" share one cached SerpApi call.
+  const canonical = canonicalKey(query);
+  const key = searchCacheKey(canonical, lat, lng, radiusKm);
 
-  const hit = await cacheGet<{ places: Place[]; mock: boolean }>(key);
+  const hit = await cacheGet<{
+    places: Place[];
+    mock: boolean;
+    canonicalKey: string;
+    fallback?: SearchFallback;
+  }>(key);
   if (hit) {
-    return { places: hit.places, cached: true, mock: hit.mock };
-  }
-
-  let rawItems: SerpApiLocalResult[];
-  let mock = false;
-
-  if (useMock()) {
-    mock = true;
-    rawItems = filterMock(await loadMockResults(), normalizedQuery);
-  } else {
-    const apiKey = process.env.SERPAPI_KEY;
-    if (!apiKey) {
-      throw new Error("SERPAPI_KEY is not set");
-    }
-    try {
-      rawItems = (await serpapiSearchPlaces({
-        q: query,
-        lat,
-        lng,
-        radiusKm,
-        apiKey,
-      })) as SerpApiLocalResult[];
-    } catch (err) {
-      if (err instanceof SerpApiError) throw err;
-      throw new SerpApiError(
-        "UPSTREAM_ERROR",
-        err instanceof Error ? err.message : "Upstream request failed"
-      );
-    }
+    return {
+      places: hit.places,
+      cached: true,
+      mock: hit.mock,
+      canonicalKey: hit.canonicalKey ?? canonical,
+      fallback: hit.fallback,
+    };
   }
 
   const origin = { lat, lng };
-  const normalized: Place[] = [];
-  for (const item of rawItems) {
-    const place = normalizePlace(item, origin);
-    if (place) normalized.push(place); // null = permanently closed, excluded
+  let places: Place[];
+  let mock = false;
+  let fallback: SearchFallback | undefined;
+
+  if (useMock()) {
+    mock = true;
+    const rawItems = filterMock(await loadMockResults(), canonical);
+    places = dedupePlaces(normalizeSerpApiItems(rawItems, origin));
+  } else {
+    const live = await fetchLive(canonical, lat, lng, radiusKm, origin);
+    places = live.places;
+    fallback = live.fallback;
   }
 
-  const deduped = dedupePlaces(normalized);
-  const meanRating = meanRatingOf(deduped);
-  const scored = deduped
+  const meanRating = meanRatingOf(places);
+  const scored = places
     .map((p) => ({ ...p, score: scorePlace(p, radiusKm, meanRating) }))
     .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
     .slice(0, MAX_RESULTS);
 
-  await cacheSet(key, { places: scored, mock }, SEARCH_CACHE_TTL_SEC);
-  logSearch({ query: normalizedQuery, lat, lng, radiusKm, results: scored.length, cached: false });
+  await cacheSet(
+    key,
+    { places: scored, mock, canonicalKey: canonical, fallback },
+    SEARCH_CACHE_TTL_SEC
+  );
+  logSearch({ query: canonical, lat, lng, radiusKm, results: scored.length, cached: false });
 
-  return { places: scored, cached: false, mock };
+  return { places: scored, cached: false, mock, canonicalKey: canonical, fallback };
 }

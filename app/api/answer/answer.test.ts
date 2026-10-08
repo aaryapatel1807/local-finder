@@ -9,6 +9,13 @@ import { POST } from "./route";
 import { clearMemoryCache } from "@/lib/cache";
 import { clearRateLimits } from "@/lib/ratelimit";
 
+// Quota-exhausted tests drive the pipeline to the OSM tier; keep Overpass
+// out of unit tests entirely (empty result -> quota path).
+vi.mock("@/lib/osm", async (importOriginal) => {
+  const orig = await importOriginal<typeof import("@/lib/osm")>();
+  return { ...orig, searchOsmElements: vi.fn().mockResolvedValue([]) };
+});
+
 process.env.USE_MOCK = "true";
 
 let ipCounter = 200;
@@ -66,5 +73,68 @@ describe("POST /api/answer", () => {
       const json = (await res.json()) as { error: { code: string } };
       expect(json.error.code).toBe("INVALID_INPUT");
     }
+  });
+});
+
+describe("POST /api/answer (quota-exhausted AI mode)", () => {
+  const groqReply = (content: string) =>
+    Promise.resolve({
+      ok: true,
+      json: () =>
+        Promise.resolve({ choices: [{ message: { content } }] }),
+    });
+
+  beforeEach(async () => {
+    vi.stubEnv("USE_MOCK", "false");
+    vi.stubEnv("SERPAPI_KEY", "");
+    vi.stubEnv("GROQ_API_KEY", "test-key");
+    vi.stubEnv("MONTHLY_CALL_LIMIT", "1");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        groqReply(
+          '{"text": "Look for 24-hour hospital pharmacies; they stay open all night."}'
+        )
+      )
+    );
+    // Exhaust the quota of 1.
+    const { incrementCalls, resetUsageForTests } = await import(
+      "@/lib/usage"
+    );
+    resetUsageForTests();
+    await incrementCalls(1);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("returns a flagged unverified general answer when quota is exhausted", async () => {
+    const res = await POST(answerRequest(VALID));
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as {
+      answer: unknown;
+      unverifiedAnswer?: { text: string; unverified: boolean };
+      cached: boolean;
+    };
+    expect(json.answer).toBeNull();
+    expect(json.unverifiedAnswer?.unverified).toBe(true);
+    expect(json.unverifiedAnswer?.text).toContain("hospital");
+    expect(json.cached).toBe(false);
+  });
+
+  it("serves the unverified answer from cache on repeat", async () => {
+    await POST(answerRequest(VALID));
+    const res = await POST(answerRequest(VALID));
+    const json = (await res.json()) as { cached: boolean };
+    expect(json.cached).toBe(true);
+  });
+
+  it("degrades to { answer: null } when the AI call fails", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("down")));
+    const res = await POST(answerRequest(VALID));
+    const json = (await res.json()) as { answer: unknown };
+    expect(res.status).toBe(200);
+    expect(json.answer).toBeNull();
   });
 });

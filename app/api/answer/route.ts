@@ -3,6 +3,9 @@
  *
  * Request:  { text, lat, lng, radiusKm }
  * Response: 200 { answer: { place, reasons, summary } | null, query, cached, aiDisabled? }
+ *           200 { answer: null, unverifiedAnswer: { text, unverified: true }, query, cached }
+ *             — quota-exhausted path: Groq general-knowledge guidance, clearly
+ *             flagged unverified (never presented as live listings).
  *           400 INVALID_INPUT | 429 RATE_LIMITED.
  *
  * Flow: parseQuery(text) -> the SAME search pipeline as /api/search ->
@@ -21,8 +24,9 @@ import {
 } from "@/lib/ratelimit";
 import { apiError } from "@/lib/errors";
 import { cacheGet, cacheSet } from "@/lib/cache";
-import { askGroqJson, isAiEnabled, parseQuery } from "@/lib/ai";
+import { askGroqJson, answerGeneralKnowledge, isAiEnabled, parseQuery } from "@/lib/ai";
 import { searchPlaces } from "@/lib/searchPipeline";
+import { SerpApiError } from "@/lib/serpapi";
 
 export const dynamic = "force-dynamic";
 
@@ -48,6 +52,45 @@ type Answer = {
   reasons: string[];
   summary: string;
 } | null;
+
+/** Quota-exhausted general answer (flagged unverified — never a listing). */
+type UnverifiedAnswer = { text: string; unverified: true } | null;
+
+function unverifiedCacheKey(
+  text: string,
+  lat: number,
+  lng: number,
+  radiusKm: number
+): string {
+  const normalized = text.trim().toLowerCase().replace(/\s+/g, " ");
+  return `answer:unverified:${normalized}:${lat.toFixed(3)}:${lng.toFixed(3)}:${radiusKm}`;
+}
+
+/**
+ * Quota-exhausted path: Groq general-knowledge guidance, explicitly
+ * flagged unverified. Cached 30 min. Never throws (degrades to null).
+ */
+async function unverifiedGeneralAnswer(
+  text: string,
+  lat: number,
+  lng: number,
+  radiusKm: number
+): Promise<{ unverifiedAnswer: UnverifiedAnswer; cached: boolean }> {
+  const key = unverifiedCacheKey(text, lat, lng, radiusKm);
+  const hit = await cacheGet<{ unverifiedAnswer: UnverifiedAnswer }>(key);
+  if (hit) return { unverifiedAnswer: hit.unverifiedAnswer, cached: true };
+  try {
+    const guidance = await answerGeneralKnowledge(text, lat, lng);
+    const unverifiedAnswer: UnverifiedAnswer = {
+      text: guidance,
+      unverified: true,
+    };
+    await cacheSet(key, { unverifiedAnswer }, ANSWER_CACHE_TTL_SEC);
+    return { unverifiedAnswer, cached: false };
+  } catch {
+    return { unverifiedAnswer: null, cached: false };
+  }
+}
 
 function answerCacheKey(
   text: string,
@@ -132,7 +175,25 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ answer: hit.answer, query, cached: true });
     }
 
-    const { places } = await searchPlaces({ query, lat, lng, radiusKm });
+    let places: Place[];
+    try {
+      ({ places } = await searchPlaces({ query, lat, lng, radiusKm }));
+    } catch (err) {
+      if (err instanceof SerpApiError && err.code === "QUOTA_EXCEEDED") {
+        // Quota-exhausted AI mode: no live listings possible — return
+        // flagged general-knowledge guidance instead of failing.
+        const { unverifiedAnswer, cached: uCached } =
+          await unverifiedGeneralAnswer(text, lat, lng, radiusKm);
+        return NextResponse.json({
+          answer: null,
+          unverifiedAnswer,
+          query,
+          cached: uCached,
+        });
+      }
+      // ANY other failure degrades to { answer: null }.
+      return NextResponse.json({ answer: null });
+    }
     const top = places.slice(0, TOP_K);
     if (top.length === 0) {
       await cacheSet(key, { answer: null }, ANSWER_CACHE_TTL_SEC);

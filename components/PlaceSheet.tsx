@@ -6,6 +6,7 @@ import {
 import type { Place, ReviewSummary } from './types'
 import { formatDistance } from './types'
 import { StatusBadge, Stars, whatsappShareUrl } from './PlaceCard'
+import Badge from './ui/badge'
 import Button from './ui/button'
 import Skeleton from './ui/skeleton'
 import RouteBadge from './RouteBadge'
@@ -484,6 +485,11 @@ export default function PlaceSheet({
           <div style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
               <StatusBadge place={place} />
+              {place.source === 'osm' && (
+                <Badge color="var(--text-muted)" background="var(--track)" border="var(--border)">
+                  {t('badges.communityData')}
+                </Badge>
+              )}
               {place.hoursToday && (
                 <span style={{ fontSize: '0.82rem', color: 'var(--text-faint)' }}>{place.hoursToday}</span>
               )}

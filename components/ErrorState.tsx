@@ -9,10 +9,13 @@ interface ErrorStateProps {
   code?: string
   message?: string
   onRetry?: () => void
+  /** Quota-exhausted AI mode: offered only for QUOTA_EXCEEDED. */
+  onAskAi?: () => void
+  aiLoading?: boolean
 }
 
 /** Error + quota-exceeded states (spec 7.8). */
-export default function ErrorState({ code, message, onRetry }: ErrorStateProps) {
+export default function ErrorState({ code, message, onRetry, onAskAi, aiLoading }: ErrorStateProps) {
   const { t } = useLanguage()
   const isQuota = code === 'QUOTA_EXCEEDED'
   const title = isQuota
@@ -43,6 +46,16 @@ export default function ErrorState({ code, message, onRetry }: ErrorStateProps) 
         <Button variant="ghost" onClick={onRetry}>
           {t('error.retry')}
         </Button>
+      )}
+      {isQuota && onAskAi && (
+        <div style={{ marginTop: onRetry ? 8 : 14 }}>
+          <Button variant="primary" onClick={onAskAi} disabled={aiLoading}>
+            {aiLoading ? t('answer.loading') : t('error.askAi')}
+          </Button>
+          <p style={{ fontSize: '0.78rem', color: 'var(--text-faint)', marginTop: 8, maxWidth: 320 }}>
+            {t('error.askAiNote')}
+          </p>
+        </div>
       )}
     </GlassCard>
   )

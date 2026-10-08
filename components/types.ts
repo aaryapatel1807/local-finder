@@ -23,6 +23,8 @@ export interface Place {
   distanceKm?: number
   thumbnail?: string
   score?: number
+  /** Data tier: SerpApi (rich) or OSM (free community data, no ratings). */
+  source?: 'serpapi' | 'osm'
 }
 
 export interface SearchResponse {
@@ -31,6 +33,10 @@ export interface SearchResponse {
   places: Place[]
   /** Present when the API served mock/demo data instead of live SerpApi data. */
   mock?: boolean
+  /** Canonical English key the search was built from (quota-minimal caching). */
+  canonicalKey?: string
+  /** Set when results came from the OSM fallback tier. */
+  fallback?: 'osm'
 }
 
 export interface SearchError {
@@ -60,6 +66,14 @@ export interface ParseResponse {
   cached?: boolean
   aiDisabled?: boolean
   fallbackQuery?: string
+  /** Canonical English key (quota-minimal cache sharing across variants). */
+  canonicalKey?: string
+}
+
+/** Quota-exhausted general answer — flagged unverified, never a listing. */
+export interface UnverifiedAnswer {
+  text: string
+  unverified: true
 }
 
 /** Map the server's sort enum onto the client's SortKey. */

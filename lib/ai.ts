@@ -257,6 +257,41 @@ export async function answerFromReviews(
 }
 
 /**
+ * Prompt for the quota-exhausted general answer (no live data available).
+ * The model must NOT invent specific places — general guidance only.
+ */
+export const GENERAL_ANSWER_SYSTEM_PROMPT = [
+  "You help someone find a nearby place, but you have NO live listings data.",
+  "Give practical general guidance in 3-5 sentences: what kinds of places to",
+  "look for, well-known chains or landmarks that commonly exist, and useful",
+  "tips (e.g. hospitals usually have 24-hour pharmacies).",
+  "NEVER invent specific shop names, addresses, phone numbers, ratings,",
+  "review counts, or distances. If you name a chain, only name large",
+  "well-known ones and say they may or may not be nearby.",
+  'Reply with JSON only: { "text": "<the guidance>" }.',
+].join("\n");
+
+const GeneralAnswerSchema = z.object({ text: z.string().min(1) });
+
+/**
+ * General-knowledge answer for the quota-exhausted path. Throws on ANY
+ * failure — callers catch and degrade to { answer: null }.
+ */
+export async function answerGeneralKnowledge(
+  question: string,
+  lat: number,
+  lng: number
+): Promise<string> {
+  const out = await askGroqJson(
+    GENERAL_ANSWER_SYSTEM_PROMPT,
+    `Question: "${question}" (user is near ${lat.toFixed(2)}, ${lng.toFixed(2)}).`,
+    GeneralAnswerSchema,
+    350
+  );
+  return out.text;
+}
+
+/**
  * Generic Groq JSON call: sends a system + user prompt, extracts JSON from
  * the reply and validates it against a Zod schema. Throws on ANY failure
  * (no key, network error, bad JSON, schema mismatch) — callers catch and

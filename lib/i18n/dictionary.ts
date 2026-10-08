@@ -72,6 +72,7 @@ export const STRINGS: Record<Lang, Record<string, string>> = {
     'badges.unknown': 'Hours unknown',
     'badges.noRating': 'No rating',
     'badges.rated': 'Rated {rating} out of 5',
+    'badges.communityData': 'Community data',
 
     // ── Empty / error states ─────────────────────────────────────
     'empty.title': 'No places found',
@@ -79,6 +80,8 @@ export const STRINGS: Record<Lang, Record<string, string>> = {
     'empty.widen': 'Widen the radius',
     'error.quotaTitle': 'Search is busy right now',
     'error.quotaBody': "We've used up our live place searches for now. Please wait a bit and try again.",
+    'error.askAi': 'Ask AI instead',
+    'error.askAiNote': 'Get general guidance from AI while live search is unavailable. Not verified listings.',
     'error.rateTitle': 'Too many searches',
     'error.genericTitle': 'Something went wrong',
     'error.genericBody': "Couldn't reach the places service. Check your connection and try again.",
@@ -308,6 +311,8 @@ export const STRINGS: Record<Lang, Record<string, string>> = {
     'answer.dismiss': 'Dismiss answer',
     'answer.loading': 'Finding the best answer…',
     'answer.viewDetails': 'View details',
+    'answer.unverifiedTitle': 'AI answer — not verified listings',
+    'answer.unverifiedNote': 'Based on general knowledge, not live listings. Places mentioned may not exist — verify before visiting.',
     'compare.title': 'Compare',
     'compare.close': 'Close comparison',
     'compare.comparing': 'Comparing {names}',
@@ -391,6 +396,7 @@ export const STRINGS: Record<Lang, Record<string, string>> = {
     'badges.unknown': 'समय की जानकारी नहीं',
     'badges.noRating': 'कोई रेटिंग नहीं',
     'badges.rated': '5 में से {rating} रेटिंग',
+    'badges.communityData': 'सामुदायिक डेटा',
 
     // ── Empty / error states ─────────────────────────────────────
     'empty.title': 'कोई जगह नहीं मिली',
@@ -402,6 +408,8 @@ export const STRINGS: Record<Lang, Record<string, string>> = {
     'error.genericTitle': 'कुछ गड़बड़ हो गई',
     'error.genericBody': 'प्लेस सेवा तक नहीं पहुँच सके। अपना कनेक्शन जाँचें और फिर कोशिश करें।',
     'error.retry': 'फिर कोशिश करें',
+    'error.askAi': 'AI से पूछें',
+    'error.askAiNote': 'लाइव खोज उपलब्ध न होने पर AI से सामान्य मार्गदर्शन पाएं। सत्यापित सूची नहीं।',
 
     // ── Home page ────────────────────────────────────────────────
     'page.welcomeTitle': 'आपको आस-पास क्या चाहिए?',
@@ -627,6 +635,8 @@ export const STRINGS: Record<Lang, Record<string, string>> = {
     'answer.dismiss': 'उत्तर हटाएँ',
     'answer.loading': 'सबसे अच्छा उत्तर खोजा जा रहा है…',
     'answer.viewDetails': 'विवरण देखें',
+    'answer.unverifiedTitle': 'AI उत्तर — सत्यापित सूची नहीं',
+    'answer.unverifiedNote': 'सामान्य ज्ञान पर आधारित, लाइव सूची नहीं। बताए गए स्थान मौजूद न भी हों — जाने से पहले सत्यापित करें।',
     'compare.title': 'तुलना करें',
     'compare.close': 'तुलना बंद करें',
     'compare.comparing': '{names} की तुलना',
@@ -710,6 +720,7 @@ export const STRINGS: Record<Lang, Record<string, string>> = {
     'badges.unknown': 'સમયની માહિતી નથી',
     'badges.noRating': 'કોઈ રેટિંગ નથી',
     'badges.rated': '5 માંથી {rating} રેટિંગ',
+    'badges.communityData': 'સામુદાયિક ડેટા',
 
     // ── Empty / error states ─────────────────────────────────────
     'empty.title': 'કોઈ સ્થળ મળ્યું નથી',
@@ -721,6 +732,8 @@ export const STRINGS: Record<Lang, Record<string, string>> = {
     'error.genericTitle': 'કંઈક ખોટું થયું',
     'error.genericBody': 'પ્લેસ સેવા સુધી પહોંચી શકાયું નહીં. તમારું કનેક્શન તપાસો અને ફરી પ્રયાસ કરો.',
     'error.retry': 'ફરી પ્રયાસ કરો',
+    'error.askAi': 'AI ને પૂછો',
+    'error.askAiNote': 'લાઇવ શોધ ઉપલબ્ધ ન હોય ત્યારે AI પાસેથી સામાન્ય માર્ગદર્શન મેળવો. ચકાસાયેલ યાદી નથી.',
 
     // ── Home page ────────────────────────────────────────────────
     'page.welcomeTitle': 'નજીકમાં તમારે શું જોઈએ છે?',
@@ -946,6 +959,8 @@ export const STRINGS: Record<Lang, Record<string, string>> = {
     'answer.dismiss': 'જવાબ દૂર કરો',
     'answer.loading': 'શ્રેષ્ઠ જવાબ શોધી રહ્યા છીએ…',
     'answer.viewDetails': 'વિગતો જુઓ',
+    'answer.unverifiedTitle': 'AI જવાબ — ચકાસાયેલ યાદી નથી',
+    'answer.unverifiedNote': 'સામાન્ય જ્ઞાન પર આધારિત, લાઇવ યાદી નથી. જણાવેલ સ્થળો અસ્તિત્વમાં ન પણ હોય — મુલાકાત પહેલાં ખાતરી કરો.',
     'compare.title': 'સરખામણી',
     'compare.close': 'સરખામણી બંધ કરો',
     'compare.comparing': '{names} ની સરખામણી',

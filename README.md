@@ -100,14 +100,47 @@ Out of the box the app runs in **mock mode** (`USE_MOCK=true`): it serves
 - **Live mode** (`USE_MOCK=false` + `SERPAPI_KEY` set): real Google Maps results via SerpApi,
   real reviews fetched per place, AI summaries via Groq when `GROQ_API_KEY` is set.
 
+## Three-tier data architecture (quota-minimal)
+
+SerpApi's free quota can never be topped up, so the app is designed to spend
+as close to zero SerpApi calls as possible:
+
+| Tier | Source | Cost | What it provides |
+| ---- | ------ | ---- | ---------------- |
+| 1. Rich primary | SerpApi Google Maps | 1 call/search | Ratings, review counts, photos, hours, phone |
+| 2. Factual fallback | OpenStreetMap (Overpass API) | Free, no key, no quota | Real names, coordinates, addresses, opening hours |
+| 3. Language | Groq free tier (`openai/gpt-oss-120b`) | Free | Query parsing, disambiguation, review tags, answers — never place facts |
+
+**Fallback behavior** (`/api/search`, live mode): SerpApi is tried first when a
+key is present and quota is healthy. The app falls back to OSM when there is
+no key, quota is exhausted or ≥90% used, SerpApi errors, or SerpApi returns
+zero results (then merged + deduped). OSM places carry `source: "osm"`, get a
+"Community data" badge in the UI, and show "No rating" instead of stars —
+scoring degrades gracefully to distance + open-status weighting.
+
+**Quota-exhausted AI mode**: when `/api/search` returns `QUOTA_EXCEEDED`, the
+error state offers "Ask AI instead" → `/api/answer` returns Groq
+general-knowledge guidance flagged `unverified: true`, rendered in a distinct
+amber card labeled "AI answer — not verified listings". The model is
+instructed never to invent specific shop names, addresses, or ratings.
+
+**What costs quota vs what's free**
+- Costs SerpApi quota: `/api/search` (1/search), `/api/reviews`, `/api/photos`.
+- Free: `/api/parse` (Groq), `/api/answer`, `/api/ask`, `/api/geocode`
+  (Photon), `/api/route` (OSRM), OSM fallback, all client-side ML.
+
 ## Quota notes
 
 - SerpApi's **free plan is roughly 100–250 searches/month** — treat every call as precious.
 - The app rate-limits **20 searches per IP per hour** (10/hour for the AI routes) and keeps a
   monthly counter; past `MONTHLY_CALL_LIMIT` it returns a friendly "Search is busy right now"
   instead of calling SerpApi.
-- **Search results are cached 10 minutes**, keyed by normalized query + coordinates rounded to
-  3 decimals (~110 m, so nearby users share entries). Review summaries are cached **24 hours**.
+- **Canonical query keys**: "davakhana", "medical store", "pharmasy" and "chemist" all
+  canonicalize to `pharmacy` (`lib/canonical.ts`), so variants share ONE cached SerpApi call.
+  `/api/parse` results are cached 24h per distinct input.
+- **Search results are cached 60 minutes**, keyed by canonical query + coordinates rounded to
+  3 decimals (~110 m, so nearby users share entries). OSM results are cached **24 hours**
+  (separate `osm:` namespace). Review summaries are cached **24 hours**.
 - Cache is two-level: in-memory L1, optional Upstash Redis L2.
 - During development and demos, stay in mock mode or pre-warm the cache with your demo searches.
 

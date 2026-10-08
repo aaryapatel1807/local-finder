@@ -229,6 +229,11 @@ export default function PlaceCard({
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px', flexWrap: 'wrap' }}>
           <StatusBadge place={place} />
+          {place.source === 'osm' && (
+            <Badge color="var(--text-muted)" background="var(--track)" border="var(--border)">
+              {t('badges.communityData')}
+            </Badge>
+          )}
           {hiddenGem && (
             <Badge color="#7B61FF" background="rgba(123,97,255,0.12)" border="rgba(123,97,255,0.28)">
               <Sparkles size={11} aria-hidden /> {t('card.hiddenGem')}

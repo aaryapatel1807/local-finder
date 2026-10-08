@@ -4,7 +4,7 @@
  * Thin wrapper: validation + rate limit live here, the pipeline lives in
  * lib/searchPipeline.ts (shared with /api/answer).
  *
- * Response: { cached, count, places, mock }
+ * Response: { cached, count, places, mock, canonicalKey, fallback? }
  *           400 INVALID_INPUT | 429 RATE_LIMITED | 502 UPSTREAM_ERROR |
  *           503 QUOTA_EXCEEDED.
  */
@@ -51,7 +51,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   try {
-    const { places, cached, mock } = await searchPlaces({
+    const { places, cached, mock, canonicalKey, fallback } = await searchPlaces({
       query,
       lat,
       lng,
@@ -62,6 +62,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       count: places.length,
       places,
       mock,
+      canonicalKey,
+      ...(fallback ? { fallback } : {}),
     });
   } catch (err) {
     if (err instanceof SerpApiError && err.code === "QUOTA_EXCEEDED") {

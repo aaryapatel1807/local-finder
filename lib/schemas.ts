@@ -56,6 +56,12 @@ export const PlaceSchema = z.object({
   distanceKm: z.number().optional(),
   thumbnail: z.string().optional(),
   score: z.number().optional(),
+  /**
+   * Data tier that produced this place: SerpApi (rich: ratings/reviews)
+   * or OSM (free community data, no ratings). Absent for mock/demo
+   * entries, which mimic the SerpApi shape.
+   */
+  source: z.enum(["serpapi", "osm"]).optional(),
 });
 
 export type Place = z.infer<typeof PlaceSchema>;

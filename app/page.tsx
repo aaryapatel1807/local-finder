@@ -16,7 +16,7 @@ import EmptyState from '../components/EmptyState'
 import ErrorState from '../components/ErrorState'
 import Toast from '../components/Toast'
 import AmbiguityChips from '../components/AmbiguityChips'
-import AnswerCard from '../components/AnswerCard'
+import AnswerCard, { UnverifiedAnswerCard } from '../components/AnswerCard'
 import CompareTable from '../components/CompareTable'
 import ErrandPlanner from '../components/ErrandPlanner'
 import MeetInMiddle from '../components/MeetInMiddle'
@@ -117,6 +117,9 @@ function HomeContent() {
   const [anchor, setAnchor] = useState<{ label: string } | null>(null)
   const [answer, setAnswer] = useState<AnswerState | null>(null)
   const [answerLoading, setAnswerLoading] = useState(false)
+  // Quota-exhausted AI mode: general-knowledge answer, flagged unverified.
+  const [unverifiedAnswer, setUnverifiedAnswer] = useState<string | null>(null)
+  const [unverifiedLoading, setUnverifiedLoading] = useState(false)
   const [compareMode, setCompareMode] = useState(false)
   const [compareIds, setCompareIds] = useState<string[]>([])
   const [pickerOpen, setPickerOpen] = useState(false)
@@ -235,6 +238,8 @@ function HomeContent() {
   const submitSearch = useCallback((text: string) => {
     const t = text.trim()
     if (!t) return
+    setUnverifiedAnswer(null)
+    setUnverifiedLoading(false)
     if (isQuestionLike(t)) {
       void fetchAnswer(t)
     } else {
@@ -243,6 +248,41 @@ function HomeContent() {
     }
     runSearch(t)
   }, [fetchAnswer, runSearch])
+
+  /**
+   * Quota-exhausted AI mode: ask /api/answer for general-knowledge
+   * guidance (flagged unverified) when live search is unavailable.
+   */
+  const askAiInstead = useCallback(async () => {
+    if (!coords || !submittedQuery.trim() || aiDisabled) return
+    setUnverifiedLoading(true)
+    setUnverifiedAnswer(null)
+    try {
+      const res = await fetch('/api/answer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: submittedQuery.trim(),
+          lat: coords.lat,
+          lng: coords.lng,
+          radiusKm,
+        }),
+      })
+      const body = await res.json().catch(() => null)
+      if (body?.aiDisabled) {
+        setAiDisabled(true)
+        return
+      }
+      const ua = body?.unverifiedAnswer
+      if (ua?.unverified && typeof ua.text === 'string') {
+        setUnverifiedAnswer(ua.text)
+      }
+    } catch {
+      /* leave the error state standing */
+    } finally {
+      setUnverifiedLoading(false)
+    }
+  }, [coords, submittedQuery, radiusKm, aiDisabled])
 
   // ── Results: open-now + price filters + client-side sort (no new API call) ─
   const results = useMemo(() => {
@@ -831,7 +871,22 @@ function HomeContent() {
         )}
 
         {!search.isLoading && search.isError && (
-          <ErrorState code={errorCode} message={search.error?.message} onRetry={() => search.refetch()} />
+          <ErrorState
+            code={errorCode}
+            message={search.error?.message}
+            onRetry={() => search.refetch()}
+            onAskAi={askAiInstead}
+            aiLoading={unverifiedLoading}
+          />
+        )}
+
+        {/* Quota-exhausted AI answer (flagged unverified — never a listing) */}
+        {hasSearched && (unverifiedAnswer || unverifiedLoading) && (
+          <UnverifiedAnswerCard
+            text={unverifiedAnswer ?? ''}
+            loading={unverifiedLoading && !unverifiedAnswer}
+            onDismiss={() => { setUnverifiedAnswer(null); setUnverifiedLoading(false) }}
+          />
         )}
 
         {!search.isLoading && !search.isError && hasSearched && results.length === 0 && (
