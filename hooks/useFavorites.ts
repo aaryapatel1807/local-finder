@@ -36,7 +36,7 @@ export function useFavorites() {
         setFavorites(prev => {
           const merged = new Map(prev.map(p => [p.id, p]))
           for (const p of serverPlaces) if (p && p.id && !merged.has(p.id)) merged.set(p.id, p)
-          const next = [...merged.values()]
+          const next = Array.from(merged.values())
           try { localStorage.setItem(KEY, JSON.stringify(next)) } catch {}
           return next
         })
