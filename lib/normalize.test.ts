@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { normalizePlace, parseWeeklyHours } from "./normalize";
+import {
+  normalizePlace,
+  parseWeeklyHours,
+  dedupePlaces,
+  nameSimilarity,
+} from "./normalize";
 
 const ORIGIN = { lat: 22.3072, lng: 73.1812 };
 const NOW = new Date(2026, 9, 8, 20, 0, 0); // Thu Oct 8 2026, 8 pm local
@@ -132,5 +137,86 @@ describe("parseWeeklyHours", () => {
       operating_hours: { monday: "9AM–5PM", foo: "bar" } as Record<string, string>,
     });
     expect(h).toEqual({ Monday: "9AM–5PM" });
+  });
+});
+
+describe("dedupePlaces", () => {
+  const mk = (
+    overrides: Partial<import("./schemas").Place>
+  ): import("./schemas").Place => ({
+    id: "x",
+    name: "Apollo Pharmacy",
+    lat: 22.31,
+    lng: 73.175,
+    isOpen: true,
+    closesSoon: false,
+    ...overrides,
+  });
+
+  it("drops a near-identical name within 0.15 km", () => {
+    const a = mk({ id: "a", reviews: 100, rating: 4.2 });
+    const b = mk({
+      id: "b",
+      name: "Apollo Pharmacy ",
+      lat: 22.3101, // ~11 m away
+      lng: 73.1751,
+      reviews: 250,
+      rating: 4.0,
+    });
+    const out = dedupePlaces([a, b]);
+    expect(out).toHaveLength(1);
+    expect(out[0].id).toBe("b"); // more reviews wins
+  });
+
+  it("keeps the higher-rated listing when reviews tie", () => {
+    const a = mk({ id: "a", reviews: 100, rating: 4.2 });
+    const b = mk({
+      id: "b",
+      name: "APOLLO PHARMACY",
+      lat: 22.3101,
+      lng: 73.1751,
+      reviews: 100,
+      rating: 4.8,
+    });
+    const out = dedupePlaces([a, b]);
+    expect(out).toHaveLength(1);
+    expect(out[0].id).toBe("b");
+  });
+
+  it("keeps both when the names differ", () => {
+    const a = mk({ id: "a" });
+    const b = mk({ id: "b", name: "MedPlus Pharmacy" });
+    expect(dedupePlaces([a, b])).toHaveLength(2);
+  });
+
+  it("keeps both when the distance is >= 0.15 km", () => {
+    const a = mk({ id: "a" });
+    const b = mk({ id: "b", lat: 22.32, lng: 73.175 }); // ~1.1 km away
+    expect(dedupePlaces([a, b])).toHaveLength(2);
+  });
+
+  it("is not fooled by subset names (Jaccard < 0.8)", () => {
+    const a = mk({ id: "a", name: "Apollo Pharmacy Store" });
+    const b = mk({ id: "b", name: "Apollo Pharmacy" });
+    // Jaccard = 2/3 < 0.8 -> not dupes.
+    expect(nameSimilarity("Apollo Pharmacy Store", "Apollo Pharmacy")).toBeCloseTo(
+      2 / 3,
+      5
+    );
+    expect(dedupePlaces([a, b])).toHaveLength(2);
+  });
+
+  it("handles an empty list", () => {
+    expect(dedupePlaces([])).toEqual([]);
+  });
+});
+
+describe("nameSimilarity", () => {
+  it("is case- and punctuation-insensitive", () => {
+    expect(nameSimilarity("Sunrise Medical!", "sunrise medical")).toBe(1);
+  });
+
+  it("returns 0 for disjoint names", () => {
+    expect(nameSimilarity("Apollo Pharmacy", "SBI ATM")).toBe(0);
   });
 });

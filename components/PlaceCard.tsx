@@ -1,12 +1,43 @@
 'use client'
-import { useState } from 'react'
-import { Heart, Star } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { Check, Heart, MessageCircle, Phone, Sparkles, Star } from 'lucide-react'
 import type { Place } from './types'
 import { formatDistance } from './types'
 import Badge from './ui/badge'
 import GlassCard from './shared/GlassCard'
+import RouteBadge from './RouteBadge'
+import { useRouteTime } from '../hooks/useRouteTime'
+
+/** Place with the Phase 2 server field minutesToClose (defensive: may be absent). */
+type PlaceWithClose = Place & { minutesToClose?: number }
+
+export function openStatusText(place: Place): string {
+  if (place.isOpen === true) return 'Open'
+  if (place.isOpen === false) return 'Closed'
+  return 'Hours unknown'
+}
+
+/** wa.me share link: "<name> — <open status>. <address>. <maps link>". */
+export function whatsappShareUrl(place: Place): string {
+  const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${place.lat},${place.lng}`
+  const parts = [`${place.name} — ${openStatusText(place)}`, place.address, mapsUrl].filter(Boolean)
+  return `https://wa.me/?text=${encodeURIComponent(parts.join('. '))}`
+}
 
 export function StatusBadge({ place }: { place: Place }) {
+  const minutesToClose = (place as PlaceWithClose).minutesToClose
+  if (
+    place.isOpen === true &&
+    typeof minutesToClose === 'number' &&
+    Number.isFinite(minutesToClose) &&
+    minutesToClose >= 0
+  ) {
+    return (
+      <Badge color="#B45309" background="rgba(217,119,6,0.14)" border="rgba(217,119,6,0.30)">
+        Closes in {Math.round(minutesToClose)} min
+      </Badge>
+    )
+  }
   if (place.closesSoon) {
     return <Badge color="#D97706" background="rgba(217,119,6,0.12)" border="rgba(217,119,6,0.25)">Closing soon</Badge>
   }
@@ -45,11 +76,29 @@ interface PlaceCardProps {
   onToggleFavorite: (place: Place) => void
   onOpen: (place: Place) => void
   highlighted?: boolean
+  /** Optional user location — enables the "N min walk" route badge. */
+  userCoords?: { lat: number; lng: number } | null
+  /** Compare mode: show a select checkbox (max 3 selected). */
+  selectable?: boolean
+  compareSelected?: boolean
+  compareDisabled?: boolean
+  onToggleCompare?: (place: Place) => void
+  /** Emergency mode: show a large one-tap call button. */
+  emergency?: boolean
+  /** Top-quartile Bayesian rating with <100 reviews — "Hidden gem". */
+  hiddenGem?: boolean
 }
 
 /** Glass result card — the same component renders the Saved tab. */
-export default function PlaceCard({ place, isFavorite, onToggleFavorite, onOpen, highlighted }: PlaceCardProps) {
+export default function PlaceCard({
+  place, isFavorite, onToggleFavorite, onOpen, highlighted,
+  userCoords, selectable, compareSelected, compareDisabled, onToggleCompare,
+  emergency, hiddenGem,
+}: PlaceCardProps) {
   const [imgFailed, setImgFailed] = useState(false)
+  const places = useMemo(() => [place], [place])
+  const routes = useRouteTime(userCoords, places, 'walk')
+  const route = routes.get(place.id)
 
   return (
     <GlassCard
@@ -93,19 +142,75 @@ export default function PlaceCard({ place, isFavorite, onToggleFavorite, onOpen,
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '8px' }}>
           <h3 style={{ fontSize: '0.98rem', fontWeight: 600, lineHeight: 1.3 }}>{place.name}</h3>
-          <button
-            type="button"
-            onClick={e => { e.stopPropagation(); onToggleFavorite(place) }}
-            aria-label={isFavorite ? `Remove ${place.name} from saved` : `Save ${place.name}`}
-            aria-pressed={isFavorite}
-            style={{
-              background: 'transparent', border: 'none', cursor: 'pointer', padding: 4,
-              color: isFavorite ? '#E14E42' : 'var(--text-muted)', flexShrink: 0,
-              borderRadius: '8px',
-            }}
-          >
-            <Heart size={18} fill={isFavorite ? '#E14E42' : 'transparent'} />
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '2px', flexShrink: 0 }}>
+            {emergency && place.phone && (
+              <a
+                href={`tel:${place.phone}`}
+                onClick={e => e.stopPropagation()}
+                aria-label={`Call ${place.name} now`}
+                title={`Call ${place.name}`}
+                style={{
+                  background: 'rgba(22,163,74,0.16)',
+                  border: '1px solid rgba(22,163,74,0.4)',
+                  borderRadius: '14px', width: 44, height: 44,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  color: '#16A34A', flexShrink: 0,
+                }}
+              >
+                <Phone size={21} />
+              </a>
+            )}
+            <a
+              href={whatsappShareUrl(place)}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={e => e.stopPropagation()}
+              aria-label={`Share ${place.name} on WhatsApp`}
+              title="Share on WhatsApp"
+              style={{
+                background: 'transparent', border: 'none', cursor: 'pointer', padding: 4,
+                color: 'var(--text-muted)', flexShrink: 0, borderRadius: '8px',
+                display: 'flex', alignItems: 'center',
+              }}
+            >
+              <MessageCircle size={18} />
+            </a>
+            {selectable && (
+              <button
+                type="button"
+                role="checkbox"
+                aria-checked={!!compareSelected}
+                aria-label={compareSelected ? `Remove ${place.name} from comparison` : `Select ${place.name} for comparison`}
+                disabled={!compareSelected && compareDisabled}
+                onClick={e => { e.stopPropagation(); onToggleCompare?.(place) }}
+                title={!compareSelected && compareDisabled ? 'Pick up to two places' : undefined}
+                style={{
+                  background: compareSelected ? 'var(--accent)' : 'var(--track)',
+                  border: `1px solid ${compareSelected ? 'var(--accent)' : 'var(--border)'}`,
+                  borderRadius: '8px', width: 26, height: 26,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  color: compareSelected ? '#fff' : 'var(--text-muted)',
+                  cursor: !compareSelected && compareDisabled ? 'not-allowed' : 'pointer',
+                  opacity: !compareSelected && compareDisabled ? 0.4 : 1,
+                }}
+              >
+                {compareSelected && <Check size={15} />}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={e => { e.stopPropagation(); onToggleFavorite(place) }}
+              aria-label={isFavorite ? `Remove ${place.name} from saved` : `Save ${place.name}`}
+              aria-pressed={isFavorite}
+              style={{
+                background: 'transparent', border: 'none', cursor: 'pointer', padding: 4,
+                color: isFavorite ? '#E14E42' : 'var(--text-muted)', flexShrink: 0,
+                borderRadius: '8px',
+              }}
+            >
+              <Heart size={18} fill={isFavorite ? '#E14E42' : 'transparent'} />
+            </button>
+          </div>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px', flexWrap: 'wrap' }}>
@@ -120,9 +225,15 @@ export default function PlaceCard({ place, isFavorite, onToggleFavorite, onOpen,
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px', flexWrap: 'wrap' }}>
           <StatusBadge place={place} />
+          {hiddenGem && (
+            <Badge color="#7B61FF" background="rgba(123,97,255,0.12)" border="rgba(123,97,255,0.28)">
+              <Sparkles size={11} aria-hidden /> Hidden gem
+            </Badge>
+          )}
           {place.distanceKm !== undefined && (
             <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>{formatDistance(place.distanceKm)}</span>
           )}
+          <RouteBadge route={route} mode="walk" />
           {place.price && (
             <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 600 }}>{place.price}</span>
           )}

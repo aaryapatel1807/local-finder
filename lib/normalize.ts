@@ -11,7 +11,7 @@
  */
 
 import { haversineKm } from "./distance";
-import { parseOpenState } from "./openState";
+import { resolveOpenNow } from "./openState";
 import type { Place } from "./schemas";
 
 /** Raw item as SerpApi returns it (subset we care about). */
@@ -122,8 +122,11 @@ export function normalizePlace(
     return null; // excluded from results (spec 7.5)
   }
 
-  const status = parseOpenState(openStateRaw, now);
   const weeklyHours = parseWeeklyHours(raw);
+  const status = resolveOpenNow(
+    { open_state: openStateRaw, weeklyHours },
+    now
+  );
   const hoursToday = weeklyHours ? weeklyHours[todayKey(now)] : undefined;
 
   const lat = raw.gps_coordinates?.latitude;
@@ -146,6 +149,7 @@ export function normalizePlace(
     openLabel: openStateRaw,
     isOpen: status.isOpen,
     closesSoon: status.closesSoon,
+    minutesToClose: status.minutesToClose,
     hoursToday,
     weeklyHours,
     lat: hasCoords ? (lat as number) : 0,
@@ -155,4 +159,78 @@ export function normalizePlace(
       : undefined,
     thumbnail: asString(raw.thumbnail),
   };
+}
+
+/* ------------------------------------------------------------------ */
+/* Duplicate detection (phase 2).                                      */
+/* ------------------------------------------------------------------ */
+
+/** Name similarity (token-set Jaccard) at or above this => same listing. */
+export const DUPE_NAME_SIMILARITY = 0.8;
+/** Haversine distance under this (km) together with name similarity => dupe. */
+export const DUPE_MAX_DISTANCE_KM = 0.15;
+
+/**
+ * Tokenize a place name: lowercase, strip non-alphanumerics, drop empties.
+ * Exported for tests.
+ */
+export function nameTokens(name: string): string[] {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+/**
+ * Token-set Jaccard similarity between two names, 0..1.
+ * 1 when both names tokenize to nothing (degenerate, never a dupe alone).
+ * Exported for tests.
+ */
+export function nameSimilarity(a: string, b: string): number {
+  const setA = new Set(nameTokens(a));
+  const setB = new Set(nameTokens(b));
+  if (setA.size === 0 && setB.size === 0) return 1;
+  if (setA.size === 0 || setB.size === 0) return 0;
+  let intersection = 0;
+  setA.forEach((t) => {
+    if (setB.has(t)) intersection++;
+  });
+  return intersection / (setA.size + setB.size - intersection);
+}
+
+/**
+ * Two places are the same listing when their names are near-identical
+ * (similarity >= 0.8) AND they sit within 0.15 km of each other
+ * (SerpApi often returns the same shop under a slightly different title).
+ */
+export function isDupe(a: Place, b: Place): boolean {
+  if (nameSimilarity(a.name, b.name) < DUPE_NAME_SIMILARITY) return false;
+  return haversineKm(a.lat, a.lng, b.lat, b.lng) < DUPE_MAX_DISTANCE_KM;
+}
+
+/**
+ * Drop duplicates from a normalized places list. Keeps the listing with
+ * more reviews; ties break on higher rating. Order of first appearance
+ * is otherwise preserved.
+ */
+export function dedupePlaces(places: Place[]): Place[] {
+  const kept: Place[] = [];
+  for (const p of places) {
+    const idx = kept.findIndex((k) => isDupe(k, p));
+    if (idx === -1) {
+      kept.push(p);
+      continue;
+    }
+    const cur = kept[idx];
+    const pReviews = p.reviews ?? 0;
+    const curReviews = cur.reviews ?? 0;
+    if (
+      pReviews > curReviews ||
+      (pReviews === curReviews && (p.rating ?? 0) > (cur.rating ?? 0))
+    ) {
+      kept[idx] = p;
+    }
+  }
+  return kept;
 }

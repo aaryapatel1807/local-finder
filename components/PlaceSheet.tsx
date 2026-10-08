@@ -1,13 +1,15 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { FormEvent, useEffect, useMemo, useState } from 'react'
 import {
-  ChevronDown, Copy, Globe, Heart, Navigation, Phone, Share2, Sparkles, X,
+  Car, ChevronDown, Copy, Footprints, Globe, Heart, MessageCircle, Navigation, Phone, Share2, Sparkles, X,
 } from 'lucide-react'
 import type { Place, ReviewSummary } from './types'
 import { formatDistance } from './types'
-import { StatusBadge, Stars } from './PlaceCard'
+import { StatusBadge, Stars, whatsappShareUrl } from './PlaceCard'
 import Button from './ui/button'
 import Skeleton from './ui/skeleton'
+import RouteBadge from './RouteBadge'
+import { useRouteTime, type RouteMode } from '../hooks/useRouteTime'
 import { useShell } from './shared/LayoutShell'
 
 interface PlaceSheetProps {
@@ -18,11 +20,48 @@ interface PlaceSheetProps {
   onShare: (place: Place) => void
   aiDisabled?: boolean
   onAiDisabled?: () => void
+  /** Called when the review summary arrives (placeId + optional sentiment for best-sort blending). */
+  onReviewsLoaded?: (placeId: string, sentiment?: number) => void
+  /** Optional user location — enables the walk/drive route time. */
+  userCoords?: { lat: number; lng: number } | null
+  /** Emergency mode: enlarges the Call button. */
+  emergency?: boolean
 }
 
+/** CONTRACT NOTE: POST /api/reviews also returns `tags?: string[]`,
+ *  `sentiment?: number` and `bestTimeHint?: string` (server contract),
+ *  not yet in components/types.ts. */
+interface ReviewsResponse extends ReviewSummary {
+  tags?: string[]
+  sentiment?: number
+  bestTimeHint?: string
+}
+
+/** Server tag slugs → human labels; unknown tags render as-is. */
+export const TAG_LABELS: Record<string, string> = {
+  'late-night': 'Open late',
+  'family-friendly': 'Family friendly',
+  budget: 'Budget',
+  'quick-service': 'Quick service',
+  hygienic: 'Hygienic',
+  spacious: 'Spacious',
+  parking: 'Parking',
+  delivery: 'Delivery',
+}
+
+const tagLabel = (tag: string) =>
+  TAG_LABELS[tag] ?? tag.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+
 /** AI review summary — lazy POST /api/reviews, hidden when aiDisabled or null summary. */
-function ReviewSummarySection({ place, aiDisabled, onAiDisabled }: { place: Place; aiDisabled?: boolean; onAiDisabled?: () => void }) {
-  const [summary, setSummary] = useState<ReviewSummary | null>(null)
+function ReviewSummarySection({
+  place, aiDisabled, onAiDisabled, onReviewsLoaded,
+}: {
+  place: Place
+  aiDisabled?: boolean
+  onAiDisabled?: () => void
+  onReviewsLoaded?: (placeId: string, sentiment?: number) => void
+}) {
+  const [summary, setSummary] = useState<ReviewsResponse | null>(null)
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
@@ -36,14 +75,15 @@ function ReviewSummarySection({ place, aiDisabled, onAiDisabled }: { place: Plac
       body: JSON.stringify({ dataId: place.dataId ?? place.id, placeName: place.name }),
     })
       .then(res => (res.ok ? res.json() : null))
-      .then(data => {
+      .then((data: ReviewsResponse | null) => {
         if (cancelled) return
         setLoading(false)
         if (data?.aiDisabled) {
           onAiDisabled?.()
           return
         }
-        if (data && data.summary) setSummary(data as ReviewSummary)
+        if (data && data.summary) setSummary(data)
+        if (data) onReviewsLoaded?.(place.id, data.sentiment)
       })
       .catch(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
@@ -71,7 +111,19 @@ function ReviewSummarySection({ place, aiDisabled, onAiDisabled }: { place: Plac
             <p style={{ marginBottom: '4px' }}><strong style={{ color: '#16A34A' }}>Liked:</strong> {summary.pros.join(' · ')}</p>
           )}
           {summary.cons && summary.cons.length > 0 && (
-            <p><strong style={{ color: '#DC2626' }}>Complaints:</strong> {summary.cons.join(' · ')}</p>
+            <p style={{ marginBottom: '8px' }}><strong style={{ color: '#DC2626' }}>Complaints:</strong> {summary.cons.join(' · ')}</p>
+          )}
+          {summary.tags && summary.tags.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }} aria-label="Good for">
+              {summary.tags.map(t => (
+                <span key={t} className="chip chip-purple" style={{ fontSize: '0.75rem' }}>
+                  {tagLabel(t)}
+                </span>
+              ))}
+            </div>
+          )}
+          {summary.bestTimeHint && (
+            <p style={{ marginBottom: '4px' }}>🕐 Best time: {summary.bestTimeHint}</p>
           )}
           {summary.basedOn ? (
             <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '6px' }}>
@@ -88,17 +140,214 @@ function ReviewSummarySection({ place, aiDisabled, onAiDisabled }: { place: Plac
  * Details sheet: bottom sheet on mobile, sidebar-aware side panel on desktop
  * (NutriAI overlay convention — sits beside the sidebar, widens when it collapses).
  */
-export default function PlaceSheet({ place, onClose, isFavorite, onToggleFavorite, onShare, aiDisabled, onAiDisabled }: PlaceSheetProps) {
+/** Ask about this place — POST /api/ask, answered from recent reviews.
+ *  Hidden entirely when aiDisabled. */
+function AskAboutPlace({
+  place, aiDisabled, onAiDisabled,
+}: {
+  place: Place
+  aiDisabled?: boolean
+  onAiDisabled?: () => void
+}) {
+  const [question, setQuestion] = useState('')
+  const [answer, setAnswer] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    setQuestion('')
+    setAnswer(null)
+    setLoading(false)
+    setError(null)
+  }, [place?.id])
+
+  if (aiDisabled) return null
+
+  const ask = async (e: FormEvent) => {
+    e.preventDefault()
+    const q = question.trim()
+    if (!q || loading) return
+    setLoading(true)
+    setError(null)
+    setAnswer(null)
+    try {
+      const res = await fetch('/api/ask', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dataId: place.dataId, placeName: place.name, question: q }),
+      })
+      const data = await res.json().catch(() => null)
+      if (data?.aiDisabled) {
+        onAiDisabled?.()
+        return
+      }
+      if (res.ok && typeof data?.answer === 'string' && data.answer.trim()) {
+        setAnswer(data.answer)
+      } else {
+        setError('Could not get an answer right now — try again later')
+      }
+    } catch {
+      setError('Could not get an answer right now — try again later')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <section aria-label={`Ask about ${place.name}`} style={{ marginTop: '16px' }}>
+      <h4 style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: 700, marginBottom: '8px' }}>
+        <MessageCircle size={14} style={{ color: 'var(--accent-purple)' }} aria-hidden />
+        Ask about this place
+      </h4>
+      <form onSubmit={ask} style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+        <input
+          type="text"
+          value={question}
+          onChange={e => setQuestion(e.target.value)}
+          placeholder="e.g. Is parking easy here?"
+          aria-label="Your question about this place"
+          enterKeyHint="send"
+          style={{
+            flex: 1, minWidth: 0,
+            background: 'var(--input-bg)', border: '1px solid var(--input-border)',
+            borderRadius: '12px', color: 'var(--text-primary)',
+            padding: '10px 12px', fontSize: '0.85rem', fontFamily: "'Satoshi', sans-serif",
+          }}
+        />
+        <Button type="submit" variant="primary" disabled={!question.trim() || loading} style={{ padding: '10px 16px' }}>
+          {loading ? '…' : 'Ask'}
+        </Button>
+      </form>
+      {loading && (
+        <div style={{ marginTop: '8px' }} aria-live="polite">
+          <Skeleton style={{ height: 12, width: '90%' }} />
+        </div>
+      )}
+      {error && (
+        <div role="alert" style={{ fontSize: '0.82rem', color: '#DC2626', marginTop: '8px' }}>
+          {error}
+        </div>
+      )}
+      {answer && (
+        <div style={{ marginTop: '10px' }}>
+          <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '4px' }}>
+            From recent reviews
+          </div>
+          <p style={{ fontSize: '0.85rem', color: 'var(--text-faint)', lineHeight: 1.55 }}>{answer}</p>
+        </div>
+      )}
+    </section>
+  )
+}
+
+/** Photos — tap-to-load only (never auto-fetched). Hidden when there is no
+ *  dataId or the server reports quota pressure (503 QUOTA_NEAR_LIMIT). */
+function PhotosSection({ place }: { place: Place }) {
+  const [photos, setPhotos] = useState<string[] | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(false)
+  const [hidden, setHidden] = useState(false)
+
+  useEffect(() => {
+    setPhotos(null)
+    setLoading(false)
+    setError(false)
+    setHidden(false)
+  }, [place?.id])
+
+  if (!place.dataId || hidden) return null
+
+  const load = async () => {
+    setLoading(true)
+    setError(false)
+    try {
+      const res = await fetch(`/api/photos?dataId=${encodeURIComponent(place.dataId as string)}`)
+      if (res.status === 503) {
+        setHidden(true) // quota pressure — hide the section entirely
+        return
+      }
+      const body = await res.json().catch(() => null)
+      const raw = body?.photos ?? body
+      const urls = Array.isArray(raw)
+        ? raw.map((p: unknown) => (typeof p === 'string' ? p : (p as { url?: string } | null)?.url)).filter((u): u is string => !!u)
+        : []
+      if (!res.ok || urls.length === 0) {
+        setError(true)
+      } else {
+        setPhotos(urls)
+      }
+    } catch {
+      setError(true)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <section aria-label={`Photos of ${place.name}`} style={{ marginTop: '16px' }}>
+      <h4 style={{ fontSize: '0.85rem', fontWeight: 700, marginBottom: '8px' }}>Photos</h4>
+      {photos === null && !loading && !error && (
+        <Button variant="ghost" onClick={load} style={{ fontSize: '0.82rem' }}>
+          Load photos
+        </Button>
+      )}
+      {loading && (
+        <div style={{ display: 'flex', gap: '8px' }} aria-live="polite">
+          {[0, 1, 2].map(i => <Skeleton key={i} style={{ height: 120, width: 160, borderRadius: '14px', flexShrink: 0 }} />)}
+        </div>
+      )}
+      {error && (
+        <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+          Could not load photos.{' '}
+          <button
+            type="button"
+            onClick={load}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--accent-deep)', fontSize: '0.82rem', fontWeight: 600, fontFamily: "'Satoshi', sans-serif", textDecoration: 'underline' }}
+          >
+            Retry
+          </button>
+        </div>
+      )}
+      {photos && photos.length > 0 && (
+        <div
+          style={{
+            display: 'flex', gap: '8px', overflowX: 'auto',
+            scrollSnapType: 'x mandatory', paddingBottom: '4px',
+          }}
+        >
+          {photos.map((u, i) => (
+            <img
+              key={i}
+              src={u}
+              alt={`${place.name} photo ${i + 1}`}
+              loading="lazy"
+              style={{ width: 160, height: 120, objectFit: 'cover', borderRadius: '14px', scrollSnapAlign: 'start', flexShrink: 0 }}
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+export default function PlaceSheet({
+  place, onClose, isFavorite, onToggleFavorite, onShare, aiDisabled, onAiDisabled,
+  onReviewsLoaded, userCoords, emergency,
+}: PlaceSheetProps) {
   const { collapsed, isMobile } = useShell()
   const [hoursOpen, setHoursOpen] = useState(false)
   const [imgFailed, setImgFailed] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [routeMode, setRouteMode] = useState<RouteMode>('walk')
 
   useEffect(() => {
     setHoursOpen(false)
     setImgFailed(false)
     setCopied(false)
+    setRouteMode('walk')
   }, [place?.id])
+
+  const places = useMemo(() => (place ? [place] : []), [place])
+  const routes = useRouteTime(userCoords, places, routeMode)
 
   // Escape to close.
   useEffect(() => {
@@ -287,6 +536,31 @@ export default function PlaceSheet({ place, onClose, isFavorite, onToggleFavorit
             </div>
           )}
 
+          {/* route time with walk/drive toggle */}
+          {userCoords && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px', flexWrap: 'wrap' }}>
+              <div role="group" aria-label="Route mode" style={{ display: 'inline-flex', gap: '6px' }}>
+                {(['walk', 'drive'] as RouteMode[]).map(m => {
+                  const active = routeMode === m
+                  const Icon = m === 'walk' ? Footprints : Car
+                  return (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => setRouteMode(m)}
+                      aria-pressed={active}
+                      className={active ? 'chip chip-green' : 'chip chip-muted'}
+                      style={{ cursor: 'pointer', fontFamily: "'Satoshi', sans-serif", display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+                    >
+                      <Icon size={13} aria-hidden /> {m === 'walk' ? 'Walk' : 'Drive'}
+                    </button>
+                  )
+                })}
+              </div>
+              <RouteBadge route={routes.get(place.id)} mode={routeMode} />
+            </div>
+          )}
+
           {/* action row */}
           <div
             style={{
@@ -298,8 +572,17 @@ export default function PlaceSheet({ place, onClose, isFavorite, onToggleFavorit
           >
             {place.phone && (
               <a href={`tel:${place.phone}`} aria-label={`Call ${place.name}`}>
-                <Button variant="ghost" className="w-full" style={{ flexDirection: 'column', gap: 4, padding: '12px 8px', fontSize: '0.75rem' }}>
-                  <Phone size={18} /> Call
+                <Button
+                  variant="ghost"
+                  className="w-full"
+                  style={{
+                    flexDirection: 'column', gap: 4,
+                    padding: emergency ? '18px 8px' : '12px 8px',
+                    fontSize: emergency ? '0.88rem' : '0.75rem',
+                    fontWeight: emergency ? 700 : undefined,
+                  }}
+                >
+                  <Phone size={emergency ? 24 : 18} /> Call
                 </Button>
               </a>
             )}
@@ -331,9 +614,23 @@ export default function PlaceSheet({ place, onClose, isFavorite, onToggleFavorit
             >
               <Share2 size={18} /> Share
             </Button>
+            <a
+              href={whatsappShareUrl(place)}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label={`Share ${place.name} on WhatsApp`}
+            >
+              <Button variant="ghost" className="w-full" style={{ flexDirection: 'column', gap: 4, padding: '12px 8px', fontSize: '0.75rem' }}>
+                <MessageCircle size={18} /> WhatsApp
+              </Button>
+            </a>
           </div>
 
-          <ReviewSummarySection place={place} aiDisabled={aiDisabled} onAiDisabled={onAiDisabled} />
+          <PhotosSection place={place} />
+
+          <ReviewSummarySection place={place} aiDisabled={aiDisabled} onAiDisabled={onAiDisabled} onReviewsLoaded={onReviewsLoaded} />
+
+          <AskAboutPlace place={place} aiDisabled={aiDisabled} onAiDisabled={onAiDisabled} />
 
           <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '18px', lineHeight: 1.5 }}>
             Your location is sent to our server only to find places near you.

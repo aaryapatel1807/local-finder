@@ -14,6 +14,8 @@ export interface Place {
   openLabel?: string
   isOpen: boolean | null
   closesSoon: boolean
+  /** Minutes until closing when open and the closing time is known. */
+  minutesToClose?: number
   hoursToday?: string
   weeklyHours?: Record<string, string>
   lat: number
@@ -44,6 +46,13 @@ export interface ParsedQueryResult {
   priceMax?: number
   near?: string
   sort?: 'best' | 'nearest' | 'rating' | 'reviews'
+  /** Set only when the AI parser finds the term genuinely ambiguous. */
+  ambiguous?: {
+    term: string
+    options: { label: string; query: string }[]
+  }
+  /** 'hi' = Hindi, 'gu' = Gujarati (script or transliterated); omitted for English. */
+  detectedLang?: 'hi' | 'gu' | 'en'
 }
 
 export interface ParseResponse {
@@ -68,9 +77,15 @@ export interface ReviewSummary {
   cons?: string[]
   basedOn?: number
   aiDisabled?: boolean
+  /** From the same summarize call (phase 2): fixed-allowlist tags. */
+  tags?: string[]
+  /** From the same summarize call (phase 2): -1 (negative) .. 1 (positive). */
+  sentiment?: number
+  /** From the same summarize call: busy/quiet hint, only when reviews support it. */
+  bestTimeHint?: string
 }
 
-export type SortKey = 'best' | 'nearest' | 'rated' | 'reviewed'
+export type SortKey = 'best' | 'nearest' | 'rated' | 'reviewed' | 'foryou'
 
 /** Client-side sort of fetched places — no new API call (spec 6.4). Cap 20. */
 export function sortPlaces(places: Place[], sort: SortKey): Place[] {
@@ -84,6 +99,11 @@ export function sortPlaces(places: Place[], sort: SortKey): Place[] {
       break
     case 'reviewed':
       arr.sort((a, b) => (b.reviews ?? -1) - (a.reviews ?? -1))
+      break
+    case 'foryou':
+      // The true personalized rerank is applied client-side by a hook;
+      // until then, fall back to the server 'best' order as the baseline.
+      arr.sort((a, b) => (b.score ?? -1) - (a.score ?? -1))
       break
     case 'best':
     default:

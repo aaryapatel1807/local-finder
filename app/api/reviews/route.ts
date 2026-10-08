@@ -2,17 +2,17 @@
  * POST /api/reviews — AI review summary for one place (spec 8.3).
  *
  * Request:  { dataId, placeName }
- * Response: { summary, pros, cons, basedOn, cached, mock?, aiDisabled? }
+ * Response: { summary, pros, cons, basedOn, tags?, sentiment?,
+ *             bestTimeHint?, cached, mock?, aiDisabled? }
  *
- * Cached 24h. In mock mode the summary comes from mock/reviews.json —
- * no Groq call, no SerpApi call. Live mode fetches up to 10 reviews from
- * SerpApi then summarizes with Groq; any AI failure hides the feature
- * ({ summary: null }) but still returns 200.
+ * Raw snippets come from the shared getReviewsCached() helper (24h raw
+ * cache, also used by /api/ask). The summary itself is cached 24h. In
+ * mock mode the summary is the hand-written mock entry — no Groq call,
+ * no SerpApi call. Live mode summarizes with Groq; any AI failure hides
+ * the feature ({ summary: null }) but still returns 200.
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { readFile } from "fs/promises";
-import path from "path";
 import { ReviewsRequestSchema, type ReviewSummary } from "@/lib/schemas";
 import {
   checkRateLimit,
@@ -21,7 +21,8 @@ import {
 } from "@/lib/ratelimit";
 import { apiError } from "@/lib/errors";
 import { cacheGet, cacheSet, reviewsCacheKey } from "@/lib/cache";
-import { fetchReviews, SerpApiError } from "@/lib/serpapi";
+import { SerpApiError } from "@/lib/serpapi";
+import { getReviewsCached, type MockSummary } from "@/lib/reviews";
 import {
   isAiEnabled,
   summarizeReviews,
@@ -34,36 +35,16 @@ const REVIEWS_CACHE_TTL_SEC = 24 * 60 * 60;
 
 type CachedReviews = ReviewSummary & { aiDisabled?: boolean };
 
-function useMock(): boolean {
-  return process.env.USE_MOCK !== "false"; // default true
-}
-
-type MockReviewsFile = {
-  reviews_by_data_id?: Record<
-    string,
-    {
-      place_name?: string;
-      reviews?: { snippet?: string; rating?: number; date?: string }[];
-      summary?: string;
-      pros?: string[];
-      cons?: string[];
-    }
-  >;
-};
-
-async function loadMockSummary(
-  dataId: string
-): Promise<CachedReviews | null> {
-  const file = path.join(process.cwd(), "mock", "reviews.json");
-  const json = JSON.parse(await readFile(file, "utf8")) as MockReviewsFile;
-  const entry = json.reviews_by_data_id?.[dataId];
-  if (!entry) return null;
-  return {
-    summary: entry.summary ?? "",
-    pros: entry.pros ?? [],
-    cons: entry.cons ?? [],
-    basedOn: entry.reviews?.length ?? 0,
-  };
+/** Merge optional mock-entry fields without emitting undefined keys. */
+function withOptional(
+  base: CachedReviews,
+  ms: MockSummary
+): CachedReviews {
+  const out: CachedReviews = { ...base };
+  if (ms.tags) out.tags = ms.tags;
+  if (typeof ms.sentiment === "number") out.sentiment = ms.sentiment;
+  if (ms.bestTimeHint) out.bestTimeHint = ms.bestTimeHint;
+  return out;
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
@@ -100,36 +81,39 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ ...hit, cached: true });
   }
 
+  let source;
+  try {
+    source = await getReviewsCached(dataId);
+  } catch (err) {
+    if (err instanceof SerpApiError && err.code === "QUOTA_EXCEEDED") {
+      return apiError("QUOTA_EXCEEDED", "Search is busy right now", 503);
+    }
+    return apiError("UPSTREAM_ERROR", "Couldn't reach the places service", 502);
+  }
+
+  const mock = source.mock;
   let result: CachedReviews;
-  let mock = false;
 
-  if (useMock()) {
-    mock = true;
-    const mockSummary = await loadMockSummary(dataId);
+  if (mock) {
     // Mock mode never calls Groq — hand-written summary, zero cost.
-    result = mockSummary ?? { summary: "", pros: [], cons: [], basedOn: 0 };
+    const ms = source.mockSummary;
+    result = ms
+      ? withOptional(
+          {
+            summary: ms.summary,
+            pros: ms.pros,
+            cons: ms.cons,
+            basedOn: source.reviews.length,
+          },
+          ms
+        )
+      : { summary: "", pros: [], cons: [], basedOn: 0 };
   } else {
-    const apiKey = process.env.SERPAPI_KEY;
-    if (!apiKey) {
-      return apiError("UPSTREAM_ERROR", "Couldn't reach the places service", 502);
-    }
-
-    let rawReviews: Record<string, unknown>[];
-    try {
-      rawReviews = await fetchReviews({ dataId, apiKey });
-    } catch (err) {
-      if (err instanceof SerpApiError && err.code === "QUOTA_EXCEEDED") {
-        return apiError("QUOTA_EXCEEDED", "Search is busy right now", 503);
-      }
-      return apiError("UPSTREAM_ERROR", "Couldn't reach the places service", 502);
-    }
-
-    const reviews: ReviewInput[] = rawReviews.map((r) => ({
-      snippet:
-        typeof r["snippet"] === "string" ? (r["snippet"] as string) : undefined,
-      text: typeof r["text"] === "string" ? (r["text"] as string) : undefined,
-      rating: r["rating"] as number | string | undefined,
-      date: typeof r["date"] === "string" ? (r["date"] as string) : undefined,
+    const reviews: ReviewInput[] = source.reviews.map((r) => ({
+      snippet: r.snippet,
+      text: r.text,
+      rating: r.rating,
+      date: r.date,
     }));
 
     if (!isAiEnabled()) {

@@ -3,6 +3,7 @@ import {
   bayesianAverage,
   meanRatingOf,
   scorePlace,
+  blendSentiment,
   BAYES_CONFIDENCE,
   FALLBACK_MEAN_RATING,
 } from "./score";
@@ -97,5 +98,60 @@ describe("scorePlace", () => {
   it("never returns NaN when fields are missing", () => {
     const s = scorePlace({}, 3);
     expect(Number.isFinite(s)).toBe(true);
+  });
+});
+
+describe("scorePlace with sentiment", () => {
+  // bayes for R=4.5, v=100, C=4.3: (100/150)*4.5 + (50/150)*4.3 = 4.4333.
+  const base = { rating: 4.5, reviews: 100, distanceKm: 0, isOpen: true as const };
+
+  it("is identical to the original formula when sentiment is undefined", () => {
+    const plain = scorePlace(base, 3, 4.3);
+    const withUndef = scorePlace(base, 3, 4.3, undefined);
+    expect(withUndef).toBe(plain);
+    expect(withUndef).toBeCloseTo(94.9, 1);
+  });
+
+  it("uses the rebalanced weights when sentiment is defined", () => {
+    // sentiment=+1 -> sentiment01=1:
+    // 100*(0.40*(4.4333/5) + 0.30*1 + 0.15*1 + 0.15*1) = 95.4667 -> 95.5
+    const s = scorePlace(base, 3, 4.3, 1);
+    expect(s).toBeCloseTo(95.5, 1);
+  });
+
+  it("rewards positive sentiment over negative", () => {
+    const good = scorePlace(base, 3, 4.3, 0.8);
+    const bad = scorePlace(base, 3, 4.3, -0.8);
+    expect(good).toBeGreaterThan(bad);
+    // sentiment weight 0.15 * delta 0.8 (0.9 vs 0.1) * 100 = 12
+    expect(good - bad).toBeCloseTo(12, 1);
+  });
+
+  it("clamps out-of-range sentiment to -1..1", () => {
+    expect(scorePlace(base, 3, 4.3, 99)).toBe(scorePlace(base, 3, 4.3, 1));
+    expect(scorePlace(base, 3, 4.3, -99)).toBe(scorePlace(base, 3, 4.3, -1));
+  });
+
+  it("treats NaN sentiment like undefined", () => {
+    expect(scorePlace(base, 3, 4.3, NaN)).toBe(scorePlace(base, 3, 4.3));
+  });
+});
+
+describe("blendSentiment", () => {
+  it("is a no-op when sentiment is undefined", () => {
+    expect(blendSentiment(72.4)).toBe(72.4);
+    expect(blendSentiment(72.4, undefined)).toBe(72.4);
+  });
+
+  it("nudges the score by up to ±5 points", () => {
+    expect(blendSentiment(80, 1)).toBe(85);
+    expect(blendSentiment(80, -1)).toBe(75);
+    expect(blendSentiment(80, 0)).toBe(80);
+    expect(blendSentiment(80, 0.5)).toBe(82.5);
+  });
+
+  it("clamps to 0..100", () => {
+    expect(blendSentiment(99, 1)).toBe(100);
+    expect(blendSentiment(1, -1)).toBe(0);
   });
 });
