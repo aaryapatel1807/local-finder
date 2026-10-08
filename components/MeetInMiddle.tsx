@@ -4,6 +4,7 @@ import { Loader2, Users } from 'lucide-react'
 import GlassCard from './shared/GlassCard'
 import Button from './ui/button'
 import { midpoint } from '../lib/errands'
+import { useLanguage } from '../hooks/useLanguage'
 
 interface Props {
   myCoords: { lat: number; lng: number } | null
@@ -46,6 +47,7 @@ async function geocode(query: string): Promise<GeoPoint> {
 }
 
 export default function MeetInMiddle({ myCoords, onMeet }: Props) {
+  const { t } = useLanguage()
   const [rowA, setRowA] = useState<RowState>(() => emptyRow(myCoords !== null))
   const [rowB, setRowB] = useState<RowState>(() => emptyRow(false))
   const [error, setError] = useState<string | null>(null)
@@ -53,11 +55,11 @@ export default function MeetInMiddle({ myCoords, onMeet }: Props) {
 
   const resolveRow = async (row: RowState, fallback: string): Promise<GeoPoint> => {
     if (row.useMine) {
-      if (!myCoords) throw new Error('Your location is not available — type a place instead.')
-      return { lat: myCoords.lat, lng: myCoords.lng, label: 'My location' }
+      if (!myCoords) throw new Error('ERR_NO_LOCATION')
+      return { lat: myCoords.lat, lng: myCoords.lng, label: t('meet.myLocation') }
     }
     const q = row.text.trim()
-    if (!q) throw new Error(`Enter a location for ${fallback}, or use your location.`)
+    if (!q) throw new Error('ERR_ENTER_LOCATION:' + fallback)
     return geocode(q)
   }
 
@@ -66,14 +68,18 @@ export default function MeetInMiddle({ myCoords, onMeet }: Props) {
     setBusy(true)
     try {
       const [a, b] = await Promise.all([
-        resolveRow(rowA, 'person A'),
-        resolveRow(rowB, 'person B'),
+        resolveRow(rowA, t('meet.personA')),
+        resolveRow(rowB, t('meet.personB')),
       ])
       const mid = midpoint({ lat: a.lat, lng: a.lng }, { lat: b.lat, lng: b.lng })
       const labels = `${a.label} ↔ ${b.label}`
-      onMeet(mid, `Midpoint · ${labels}`)
+      onMeet(mid, t('meet.midpointLabel', { labels }))
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Something went wrong — try again.')
+      const msg = e instanceof Error ? e.message : ''
+      if (msg === 'ERR_NO_LOCATION') setError(t('meet.noLocationError'))
+      else if (msg.startsWith('ERR_ENTER_LOCATION:'))
+        setError(t('meet.enterLocation', { person: msg.split(':')[1] }))
+      else setError(t('meet.genericError'))
     } finally {
       setBusy(false)
     }
@@ -90,7 +96,7 @@ export default function MeetInMiddle({ myCoords, onMeet }: Props) {
         <input
           aria-label={`${title} location`}
           value={row.useMine ? '' : row.text}
-          placeholder={row.useMine ? 'Using your location' : 'Type a place or area'}
+          placeholder={row.useMine ? t('meet.placeholderMine') : t('meet.placeholder')}
           disabled={row.useMine || busy}
           onChange={e => setRow({ text: e.target.value, useMine: false })}
           onKeyDown={e => { if (e.key === 'Enter') submit() }}
@@ -106,7 +112,7 @@ export default function MeetInMiddle({ myCoords, onMeet }: Props) {
           variant="ghost"
           onClick={() => setRow({ text: '', useMine: true })}
           disabled={busy || !myCoords}
-          title={myCoords ? 'Use your current location' : 'Location unavailable'}
+          title={myCoords ? t('meet.useMine') : t('meet.noLocation')}
           style={{ flexShrink: 0 }}
         >
           Use my location
@@ -119,21 +125,21 @@ export default function MeetInMiddle({ myCoords, onMeet }: Props) {
     <GlassCard style={{ padding: '20px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
         <Users size={18} color="var(--accent)" />
-        <h3 style={{ fontSize: '1.05rem' }}>Meet in the middle</h3>
+        <h3 style={{ fontSize: '1.05rem' }}>{t('meet.title')}</h3>
       </div>
       <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginBottom: '12px' }}>
         Two starting points — I'll find the halfway spot so you can search around it.
       </p>
 
       <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-        {renderRow('Person A', rowA, setRowA)}
-        {renderRow('Person B', rowB, setRowB)}
+        {renderRow(t('meet.personA'), rowA, setRowA)}
+        {renderRow(t('meet.personB'), rowB, setRowB)}
       </div>
 
       <div style={{ marginTop: '12px' }}>
         <Button variant="primary" onClick={submit} disabled={busy}>
           {busy ? <Loader2 size={16} style={{ animation: 'spin-slow 1.2s linear infinite' }} /> : null}
-          {busy ? 'Finding midpoint…' : 'Find midpoint'}
+          {busy ? t('meet.finding') : t('meet.find')}
         </Button>
       </div>
 

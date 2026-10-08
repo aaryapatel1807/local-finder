@@ -6,6 +6,7 @@ import { StatusBadge, Stars } from './PlaceCard'
 import GlassCard from './shared/GlassCard'
 import Button from './ui/button'
 import { useRouteTime } from '../hooks/useRouteTime'
+import { useLanguage } from '../hooks/useLanguage'
 
 interface CompareTableProps {
   /** Two or three places to compare side by side. */
@@ -39,6 +40,7 @@ function Cell({ children }: { children: React.ReactNode }) {
 
 /** Side-by-side comparison of two or three places in a GlassCard panel. */
 export default function CompareTable({ places, userCoords, onClose, onClear }: CompareTableProps) {
+  const { t } = useLanguage()
   const routes = useRouteTime(userCoords, places, 'walk')
   const walkTime = (p: Place) => {
     const r = routes.get(p.id)
@@ -48,16 +50,16 @@ export default function CompareTable({ places, userCoords, onClose, onClear }: C
   }
 
   return (
-    <div role="region" aria-label={`Comparing ${places.map(p => p.name).join(', ')}`}>
+    <div role="region" aria-label={t('compare.comparing', { names: places.map(p => p.name).join(', ') })}>
     <GlassCard padding="p-4" style={{ position: 'relative' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
         <h3 style={{ fontSize: '0.95rem', fontWeight: 700 }}>
-          Compare <span style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-muted)' }}>({places.length})</span>
+          {t('compare.title')} <span style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-muted)' }}>({places.length})</span>
         </h3>
         <button
           type="button"
           onClick={onClose}
-          aria-label="Close comparison"
+          aria-label={t('compare.close')}
           style={{
             background: 'var(--track)', border: 'none', borderRadius: '50%',
             width: 30, height: 30, display: 'flex', alignItems: 'center',
@@ -82,7 +84,7 @@ export default function CompareTable({ places, userCoords, onClose, onClear }: C
           </thead>
           <tbody>
             <tr>
-              <RowLabel>Rating</RowLabel>
+              <RowLabel>{t('compare.rating')}</RowLabel>
               {places.map(p => (
                 <Cell key={p.id}>
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
@@ -93,31 +95,31 @@ export default function CompareTable({ places, userCoords, onClose, onClear }: C
               ))}
             </tr>
             <tr>
-              <RowLabel>Reviews</RowLabel>
+              <RowLabel>{t('compare.reviews')}</RowLabel>
               {places.map(p => (
                 <Cell key={p.id}>{p.reviews !== undefined && p.reviews !== null ? p.reviews.toLocaleString() : '—'}</Cell>
               ))}
             </tr>
             <tr>
-              <RowLabel>Distance</RowLabel>
+              <RowLabel>{t('compare.distance')}</RowLabel>
               {places.map(p => (
                 <Cell key={p.id}>{p.distanceKm !== undefined ? formatDistance(p.distanceKm) : '—'}</Cell>
               ))}
             </tr>
             <tr>
-              <RowLabel>Walk time</RowLabel>
+              <RowLabel>{t('compare.walkTime')}</RowLabel>
               {places.map(p => <Cell key={p.id}>{walkTime(p)}</Cell>)}
             </tr>
             <tr>
-              <RowLabel>Price</RowLabel>
+              <RowLabel>{t('compare.price')}</RowLabel>
               {places.map(p => <Cell key={p.id}>{p.price ?? '—'}</Cell>)}
             </tr>
             <tr>
-              <RowLabel>Hours today</RowLabel>
+              <RowLabel>{t('compare.hoursToday')}</RowLabel>
               {places.map(p => <Cell key={p.id}>{p.hoursToday ?? '—'}</Cell>)}
             </tr>
             <tr>
-              <RowLabel>Status</RowLabel>
+              <RowLabel>{t('compare.status')}</RowLabel>
               {places.map(p => <Cell key={p.id}><StatusBadge place={p} /></Cell>)}
             </tr>
           </tbody>

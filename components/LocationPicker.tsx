@@ -5,6 +5,7 @@ import { MapPin } from 'lucide-react'
 import GlassCard from './shared/GlassCard'
 import Button from './ui/button'
 import type { Coords } from '../hooks/useGeolocation'
+import { useLanguage } from '../hooks/useLanguage'
 
 const PinMap = dynamic(() => import('./LocationPinPicker'), {
   ssr: false,
@@ -32,6 +33,7 @@ interface LocationPickerProps {
  * so it survives reloads.
  */
 export default function LocationPicker({ initialCoords, onConfirm, onCancel }: LocationPickerProps) {
+  const { t } = useLanguage()
   const fallback: Coords = { lat: 22.3072, lng: 73.1812 } // Vadodara
   const [picked, setPicked] = useState<Coords>(initialCoords ?? fallback)
 
@@ -43,22 +45,22 @@ export default function LocationPicker({ initialCoords, onConfirm, onCancel }: L
   }
 
   return (
-    <div role="dialog" aria-label="Set location on map">
+    <div role="dialog" aria-label={t('picker.dialogAria')}>
     <GlassCard padding="p-4">
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
         <MapPin size={16} style={{ color: 'var(--accent)' }} aria-hidden />
-        <span style={{ fontSize: '0.9rem', fontWeight: 700 }}>Set your location on the map</span>
+        <span style={{ fontSize: '0.9rem', fontWeight: 700 }}>{t('picker.title')}</span>
       </div>
       <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '10px' }}>
-        Drag the pin or tap anywhere on the map, then confirm.
+        {t('picker.hint')}
       </p>
       <PinMap initial={picked} onChange={setPicked} />
       <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
         <Button variant="primary" onClick={confirm} style={{ flex: 1 }}>
-          Confirm location
+          {t('picker.confirm')}
         </Button>
         <Button variant="ghost" onClick={onCancel}>
-          Cancel
+          {t('saved.cancel')}
         </Button>
       </div>
     </GlassCard>

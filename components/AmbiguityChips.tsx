@@ -1,5 +1,6 @@
 'use client'
 import GlassCard from './shared/GlassCard'
+import { useLanguage } from '../hooks/useLanguage'
 
 export interface AmbiguityOption {
   label: string
@@ -19,11 +20,12 @@ interface AmbiguityChipsProps {
  * nothing is searched until the user picks an option.
  */
 export default function AmbiguityChips({ term, options, onSelect, onDismiss }: AmbiguityChipsProps) {
+  const { t } = useLanguage()
   return (
-    <div role="group" aria-label={`Did you mean one of these for "${term}"`}>
+    <div role="group" aria-label={t('clarifier.groupAria', { term })}>
     <GlassCard padding="p-4">
       <div style={{ fontSize: '0.9rem', fontWeight: 700, marginBottom: '10px' }}>
-        Did you mean…
+        {t('clarifier.title')}
       </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
         {options.map(o => (
@@ -48,7 +50,7 @@ export default function AmbiguityChips({ term, options, onSelect, onDismiss }: A
             fontFamily: "'Satoshi', sans-serif",
           }}
         >
-          Search as typed
+          {t('clarifier.searchAsTyped')}
         </button>
       </div>
     </GlassCard>

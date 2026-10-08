@@ -2,6 +2,7 @@
 import { Sparkles, X } from 'lucide-react'
 import GlassCard from './shared/GlassCard'
 import Button from './ui/button'
+import { useLanguage } from '../hooks/useLanguage'
 
 interface AnswerCardProps {
   placeName: string
@@ -19,6 +20,7 @@ interface AnswerCardProps {
 export default function AnswerCard({
   placeName, reasons, summary, loading, onOpenDetails, onDismiss,
 }: AnswerCardProps) {
+  const { t } = useLanguage()
   return (
     <GlassCard
       padding="p-4"
@@ -27,12 +29,12 @@ export default function AnswerCard({
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
         <Sparkles size={16} style={{ color: 'var(--accent-purple)' }} aria-hidden />
-        <span style={{ fontSize: '0.85rem', fontWeight: 700 }}>Top pick</span>
+        <span style={{ fontSize: '0.85rem', fontWeight: 700 }}>{t('answer.topPick')}</span>
         {onDismiss && (
           <button
             type="button"
             onClick={onDismiss}
-            aria-label="Dismiss answer"
+            aria-label={t('answer.dismiss')}
             style={{
               marginLeft: 'auto', background: 'var(--track)', border: 'none',
               borderRadius: '50%', width: 28, height: 28,
@@ -46,7 +48,7 @@ export default function AnswerCard({
       </div>
 
       {loading ? (
-        <div style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>Finding the best answer…</div>
+        <div style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>{t('answer.loading')}</div>
       ) : (
         <>
           <h3 style={{ fontSize: '1.05rem', fontWeight: 700, marginBottom: '8px' }}>{placeName}</h3>
@@ -62,7 +64,7 @@ export default function AnswerCard({
           )}
           {onOpenDetails && (
             <Button variant="primary" onClick={onOpenDetails} style={{ padding: '10px 18px' }}>
-              View details
+              {t('answer.viewDetails')}
             </Button>
           )}
         </>
