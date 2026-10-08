@@ -19,18 +19,18 @@ import Button from '../components/ui/button'
 import { useGeolocation, CITY_FALLBACKS } from '../hooks/useGeolocation'
 import { useSearch } from '../hooks/useSearch'
 import { useFavorites } from '../hooks/useFavorites'
-import { useHealth } from '../hooks/useHealth'
 import { useLocalStorage } from '../hooks/useLocalStorage'
-import type { Place, ParseResult, SortKey } from '../components/types'
-import { sortPlaces } from '../components/types'
+import type { Place, ParseResponse, SortKey } from '../components/types'
+import { mapParseSort, sortPlaces } from '../components/types'
 
 function HomeContent() {
   const searchParams = useSearchParams()
   const { locationLabel, setLocationLabel, radiusKm, setRadiusKm } = useLocation()
   const { coords, status: geoStatus, error: geoError, requestLocation, setCoords } = useGeolocation()
   const { favorites, isFavorite, toggle } = useFavorites()
-  const health = useHealth()
-  const aiDisabled = !!health?.aiDisabled
+  // The sibling's /api/health does not carry an aiDisabled flag; the AI routes
+  // report it per-call instead, so we learn it lazily and hide AI UI after.
+  const [aiDisabled, setAiDisabled] = useState(false)
 
   const [input, setInput] = useState('')
   const [submittedQuery, setSubmittedQuery] = useState('')
@@ -167,14 +167,16 @@ function HomeContent() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text }),
       })
-      const parsed = (await res.json().catch(() => null)) as ParseResult | null
+      const body = (await res.json().catch(() => null)) as ParseResponse | null
+      if (body?.aiDisabled) setAiDisabled(true)
+      const parsed = body?.parsed
       if (res.ok && parsed?.query) {
         if (parsed.openNow) setOpenNow(true)
-        if (parsed.sort) setSort(parsed.sort)
+        setSort(mapParseSort(parsed.sort))
         runSearch(parsed.query)
       } else {
         showToast('Could not understand that — searching as typed')
-        runSearch(text)
+        runSearch(body?.fallbackQuery || text)
       }
     } catch {
       showToast('Could not understand that — searching as typed')
@@ -378,6 +380,7 @@ function HomeContent() {
         onToggleFavorite={toggle}
         onShare={shareSearch}
         aiDisabled={aiDisabled}
+        onAiDisabled={() => setAiDisabled(true)}
       />
 
       {/* Back to top */}

@@ -37,13 +37,28 @@ export interface SearchError {
   status?: number
 }
 
-/** POST /api/parse result (spec 8.4). */
-export interface ParseResult {
+/** POST /api/parse result (spec 8.4; sibling's route returns a nested `parsed`). */
+export interface ParsedQueryResult {
   query: string
   openNow?: boolean
   priceMax?: number
   near?: string
-  sort?: 'best' | 'nearest' | 'rated' | 'reviewed'
+  sort?: 'best' | 'nearest' | 'rating' | 'reviews'
+}
+
+export interface ParseResponse {
+  parsed: ParsedQueryResult | null
+  cached?: boolean
+  aiDisabled?: boolean
+  fallbackQuery?: string
+}
+
+/** Map the server's sort enum onto the client's SortKey. */
+export function mapParseSort(s?: ParsedQueryResult['sort']): SortKey {
+  if (s === 'nearest') return 'nearest'
+  if (s === 'rating') return 'rated'
+  if (s === 'reviews') return 'reviewed'
+  return 'best'
 }
 
 /** POST /api/reviews result (spec 8.3). null summary hides the AI section. */
@@ -52,6 +67,7 @@ export interface ReviewSummary {
   pros?: string[]
   cons?: string[]
   basedOn?: number
+  aiDisabled?: boolean
 }
 
 export type SortKey = 'best' | 'nearest' | 'rated' | 'reviewed'

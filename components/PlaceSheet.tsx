@@ -17,10 +17,11 @@ interface PlaceSheetProps {
   onToggleFavorite: (place: Place) => void
   onShare: (place: Place) => void
   aiDisabled?: boolean
+  onAiDisabled?: () => void
 }
 
 /** AI review summary — lazy POST /api/reviews, hidden when aiDisabled or null summary. */
-function ReviewSummarySection({ place, aiDisabled }: { place: Place; aiDisabled?: boolean }) {
+function ReviewSummarySection({ place, aiDisabled, onAiDisabled }: { place: Place; aiDisabled?: boolean; onAiDisabled?: () => void }) {
   const [summary, setSummary] = useState<ReviewSummary | null>(null)
   const [loading, setLoading] = useState(false)
 
@@ -38,10 +39,15 @@ function ReviewSummarySection({ place, aiDisabled }: { place: Place; aiDisabled?
       .then(data => {
         if (cancelled) return
         setLoading(false)
+        if (data?.aiDisabled) {
+          onAiDisabled?.()
+          return
+        }
         if (data && data.summary) setSummary(data as ReviewSummary)
       })
       .catch(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [place.id, place.dataId, place.name, aiDisabled])
 
   if (aiDisabled) return null
@@ -82,7 +88,7 @@ function ReviewSummarySection({ place, aiDisabled }: { place: Place; aiDisabled?
  * Details sheet: bottom sheet on mobile, sidebar-aware side panel on desktop
  * (NutriAI overlay convention — sits beside the sidebar, widens when it collapses).
  */
-export default function PlaceSheet({ place, onClose, isFavorite, onToggleFavorite, onShare, aiDisabled }: PlaceSheetProps) {
+export default function PlaceSheet({ place, onClose, isFavorite, onToggleFavorite, onShare, aiDisabled, onAiDisabled }: PlaceSheetProps) {
   const { collapsed, isMobile } = useShell()
   const [hoursOpen, setHoursOpen] = useState(false)
   const [imgFailed, setImgFailed] = useState(false)
@@ -327,7 +333,7 @@ export default function PlaceSheet({ place, onClose, isFavorite, onToggleFavorit
             </Button>
           </div>
 
-          <ReviewSummarySection place={place} aiDisabled={aiDisabled} />
+          <ReviewSummarySection place={place} aiDisabled={aiDisabled} onAiDisabled={onAiDisabled} />
 
           <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '18px', lineHeight: 1.5 }}>
             Your location is sent to our server only to find places near you.

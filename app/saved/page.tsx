@@ -7,12 +7,11 @@ import PlaceCard from '../../components/PlaceCard'
 import PlaceSheet from '../../components/PlaceSheet'
 import Toast from '../../components/Toast'
 import { useFavorites } from '../../hooks/useFavorites'
-import { useHealth } from '../../hooks/useHealth'
 import type { Place } from '../../components/types'
 
 export default function SavedPage() {
   const { favorites, isFavorite, toggle } = useFavorites()
-  const health = useHealth()
+  const [aiDisabled, setAiDisabled] = useState(false)
   const [selectedPlace, setSelectedPlace] = useState<Place | null>(null)
   const [toast, setToast] = useState<string | null>(null)
 
@@ -88,7 +87,8 @@ export default function SavedPage() {
         isFavorite={selectedPlace ? isFavorite(selectedPlace.id) : false}
         onToggleFavorite={toggle}
         onShare={sharePlace}
-        aiDisabled={!!health?.aiDisabled}
+        aiDisabled={aiDisabled}
+        onAiDisabled={() => setAiDisabled(true)}
       />
       <Toast message={toast} />
     </div>
