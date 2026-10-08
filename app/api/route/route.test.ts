@@ -5,7 +5,7 @@
 import { beforeEach, describe, expect, it, vi, afterEach } from "vitest";
 import { NextRequest } from "next/server";
 import { GET } from "./route";
-import { parseLatLng } from "@/lib/directions";
+import { haversineEstimate, parseLatLng } from "@/lib/directions";
 import { clearMemoryCache } from "@/lib/cache";
 import { clearRateLimits } from "@/lib/ratelimit";
 
@@ -63,6 +63,7 @@ describe("GET /api/route", () => {
     expect(json.durationMin).toBe(10);
     expect(json.distanceKm).toBe(2.5);
     expect(json.mode).toBe("drive");
+    expect(json.estimated).toBe(false);
     expect(json.cached).toBe(false);
   });
 
@@ -102,32 +103,64 @@ describe("GET /api/route", () => {
     expect(fetch).toHaveBeenCalledOnce();
   });
 
-  it("returns 503 ROUTE_UNAVAILABLE when OSRM fails", async () => {
+  it("falls back to a haversine estimate (200, estimated: true) when OSRM fails", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("boom")));
     const res = await GET(routeRequest(`from=${FROM}&to=${TO}&mode=drive`));
-    expect(res.status).toBe(503);
-    const json = (await res.json()) as { error: { code: string } };
-    expect(json.error.code).toBe("ROUTE_UNAVAILABLE");
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as Record<string, unknown>;
+    const expected = haversineEstimate(
+      { lat: 22.3072, lng: 73.1812 },
+      { lat: 22.312, lng: 73.19 },
+      "drive"
+    );
+    expect(json.estimated).toBe(true);
+    expect(json.durationMin).toBe(expected.durationMin);
+    expect(json.distanceKm).toBe(expected.distanceKm);
+    expect(json.mode).toBe("drive");
   });
 
-  it("returns 503 when OSRM returns no usable route", async () => {
+  it("estimates walk minutes from haversine distance when OSRM is unusable", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({ ok: true, json: async () => ({ routes: [] }) })
     );
-    const res = await GET(routeRequest(`from=${FROM}&to=${TO}`));
-    expect(res.status).toBe(503);
-    const json = (await res.json()) as { error: { code: string } };
-    expect(json.error.code).toBe("ROUTE_UNAVAILABLE");
+    const res = await GET(routeRequest(`from=${FROM}&to=${TO}&mode=walk`));
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as Record<string, unknown>;
+    const expected = haversineEstimate(
+      { lat: 22.3072, lng: 73.1812 },
+      { lat: 22.312, lng: 73.19 },
+      "walk"
+    );
+    expect(json.estimated).toBe(true);
+    expect(json.durationMin).toBe(expected.durationMin);
+    // walk estimate is slower than the drive estimate over the same distance
+    const drive = haversineEstimate(
+      { lat: 22.3072, lng: 73.1812 },
+      { lat: 22.312, lng: 73.19 },
+      "drive"
+    );
+    expect(expected.durationMin).toBeGreaterThan(drive.durationMin);
   });
 
-  it("returns 503 on non-OK OSRM status", async () => {
+  it("falls back to an estimate on non-OK OSRM status", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({ ok: false, status: 500, json: async () => ({}) })
     );
     const res = await GET(routeRequest(`from=${FROM}&to=${TO}`));
-    expect(res.status).toBe(503);
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as { estimated: boolean };
+    expect(json.estimated).toBe(true);
+  });
+
+  it("does not cache estimates: a retry hits OSRM again", async () => {
+    const spy = vi.fn().mockRejectedValue(new Error("boom"));
+    vi.stubGlobal("fetch", spy);
+    const params = `from=${FROM}&to=${TO}&mode=drive`;
+    await GET(routeRequest(params));
+    await GET(routeRequest(params));
+    expect(spy).toHaveBeenCalledTimes(2);
   });
 
   it("rejects invalid from/to with 400 INVALID_INPUT", async () => {

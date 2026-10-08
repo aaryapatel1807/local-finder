@@ -253,3 +253,59 @@ describe("hoursForDate", () => {
     expect(hoursForDate({ Monday: "9–5" }, at(12))).toBeUndefined();
   });
 });
+
+describe("resolveOpenNow minutesToClose", () => {
+  it("returns minutes until closing (closes in 25 min)", () => {
+    const s = resolveOpenNow(
+      { weeklyHours: { Thursday: "9:00 AM – 11:00 PM" } },
+      at(22, 35)
+    );
+    expect(s.isOpen).toBe(true);
+    expect(s.closesSoon).toBe(true);
+    expect(s.minutesToClose).toBe(25);
+  });
+
+  it("returns minutes until closing for overnight hours", () => {
+    // 11 pm, closes 2 am -> 180 min.
+    const s = resolveOpenNow(
+      { weeklyHours: { Thursday: "10:00 AM – 2:00 AM" } },
+      at(23)
+    );
+    expect(s.isOpen).toBe(true);
+    expect(s.minutesToClose).toBe(180);
+    // Yesterday's spill: Friday 1 am -> 60 min to the 2 am close.
+    const spill = resolveOpenNow(
+      { weeklyHours: { Thursday: "10:00 AM – 2:00 AM" } },
+      friAt(1)
+    );
+    expect(spill.isOpen).toBe(true);
+    expect(spill.minutesToClose).toBe(60);
+  });
+
+  it("parses minutesToClose from open_state text as a fallback", () => {
+    const s = resolveOpenNow({ open_state: "Open ⋅ Closes 11 pm" }, at(20));
+    expect(s.minutesToClose).toBe(180);
+  });
+
+  it("is undefined when unknown, closed, or open 24 hours", () => {
+    expect(resolveOpenNow({}, at(12)).minutesToClose).toBeUndefined();
+    expect(
+      resolveOpenNow({ weeklyHours: { Thursday: "Closed" } }, at(12))
+        .minutesToClose
+    ).toBeUndefined();
+    expect(
+      resolveOpenNow({ weeklyHours: { Thursday: "Open 24 hours" } }, at(3))
+        .minutesToClose
+    ).toBeUndefined();
+    expect(
+      resolveOpenNow({ open_state: "Open 24 hours" }, at(3)).minutesToClose
+    ).toBeUndefined();
+    // Closed-for-the-day weekly hours -> undefined.
+    expect(
+      resolveOpenNow(
+        { weeklyHours: { Thursday: "9:00 AM – 5:00 PM" } },
+        at(20)
+      ).minutesToClose
+    ).toBeUndefined();
+  });
+});

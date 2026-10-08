@@ -14,6 +14,8 @@ export interface Place {
   openLabel?: string
   isOpen: boolean | null
   closesSoon: boolean
+  /** Minutes until closing when open and the closing time is known. */
+  minutesToClose?: number
   hoursToday?: string
   weeklyHours?: Record<string, string>
   lat: number
@@ -49,6 +51,8 @@ export interface ParsedQueryResult {
     term: string
     options: { label: string; query: string }[]
   }
+  /** 'hi' = Hindi, 'gu' = Gujarati (script or transliterated); omitted for English. */
+  detectedLang?: 'hi' | 'gu' | 'en'
 }
 
 export interface ParseResponse {
@@ -77,6 +81,8 @@ export interface ReviewSummary {
   tags?: string[]
   /** From the same summarize call (phase 2): -1 (negative) .. 1 (positive). */
   sentiment?: number
+  /** From the same summarize call: busy/quiet hint, only when reviews support it. */
+  bestTimeHint?: string
 }
 
 export type SortKey = 'best' | 'nearest' | 'rated' | 'reviewed' | 'foryou'

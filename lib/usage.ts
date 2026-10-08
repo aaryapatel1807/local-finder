@@ -67,3 +67,17 @@ export async function incrementCalls(n = 1): Promise<number> {
 export async function isQuotaExceeded(): Promise<boolean> {
   return (await getCallsThisMonth()) >= getMonthlyLimit();
 }
+
+/**
+ * True when usage is at or above the given fraction of the monthly limit.
+ * Used by /api/photos: at 90% the route refuses new photo calls with
+ * QUOTA_NEAR_LIMIT instead of spending the last of the quota.
+ */
+export async function isQuotaNearLimit(fraction = 0.9): Promise<boolean> {
+  return (await getCallsThisMonth()) >= getMonthlyLimit() * fraction;
+}
+
+/** Test helper: reset the in-memory counter. */
+export function resetUsageForTests(): void {
+  mem = { month: "", calls: 0 };
+}

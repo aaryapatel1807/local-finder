@@ -8,6 +8,7 @@
  * a search.
  */
 
+import { createHash } from "node:crypto";
 import type { Place } from "./schemas";
 
 type Entry = { value: string; expiresAt: number };
@@ -47,6 +48,24 @@ export function searchCacheKey(
 /** Cache key for review summaries. */
 export function reviewsCacheKey(dataId: string): string {
   return `reviews:${dataId}`;
+}
+
+/** Cache key for place photo lists. */
+export function photosCacheKey(dataId: string): string {
+  return `photos:${dataId}`;
+}
+
+/**
+ * Cache key for /api/ask answers: sha256 of dataId + normalized question
+ * (the raw question never appears in the key).
+ */
+export function askCacheKey(dataId: string, question: string): string {
+  const normalized = question.trim().toLowerCase().replace(/\s+/g, " ");
+  const hash = createHash("sha256")
+    .update(`${dataId}::${normalized}`)
+    .digest("hex")
+    .slice(0, 32);
+  return `ask:${hash}`;
 }
 
 export async function cacheGet<T>(key: string): Promise<T | null> {

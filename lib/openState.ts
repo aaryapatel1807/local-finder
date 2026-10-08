@@ -18,6 +18,13 @@ export type OpenStatus = {
   closesSoon: boolean;
   /** The raw string for display, or "Hours unknown". */
   label: string;
+  /**
+   * Minutes until closing, when open and the closing time is known
+   * (from weeklyHours or a parseable "Closes …" string). Undefined when
+   * closed, unknown, 24h, or otherwise unparseable — drives the
+   * closing-soon countdown badge.
+   */
+  minutesToClose?: number;
 };
 
 const CLOSES_SOON_MINUTES = 30;
@@ -95,8 +102,13 @@ export function parseOpenState(openState?: string | null, now: Date = new Date()
       return { isOpen: true, closesSoon: true, label: raw };
     }
     const mins = parseClosingMinutes(normalized, now);
-    if (mins !== null && mins <= CLOSES_SOON_MINUTES) {
-      return { isOpen: true, closesSoon: true, label: raw };
+    if (mins !== null) {
+      return {
+        isOpen: true,
+        closesSoon: mins <= CLOSES_SOON_MINUTES,
+        label: raw,
+        minutesToClose: Math.round(mins),
+      };
     }
     return { isOpen: true, closesSoon: false, label: raw };
   }
@@ -213,6 +225,11 @@ function statusFromIntervals(
   if (intervals.length === 0) {
     return { isOpen: false, closesSoon: false, label };
   }
+  // "Open 24 hours" never closes: no countdown.
+  const allDay =
+    intervals.length === 1 &&
+    intervals[0].open === 0 &&
+    intervals[0].close === 24 * 60;
   for (const iv of intervals) {
     const overnight = iv.close < iv.open;
     const open = overnight
@@ -226,8 +243,9 @@ function statusFromIntervals(
         : iv.close - nowMin;
       return {
         isOpen: true,
-        closesSoon: minsLeft <= CLOSES_SOON_MINUTES,
+        closesSoon: !allDay && minsLeft <= CLOSES_SOON_MINUTES,
         label,
+        ...(allDay ? {} : { minutesToClose: Math.round(minsLeft) }),
       };
     }
   }
@@ -283,6 +301,7 @@ export function resolveOpenNow(
                 isOpen: true,
                 closesSoon: minsLeft <= CLOSES_SOON_MINUTES,
                 label: yValue,
+                minutesToClose: Math.round(minsLeft),
               };
             }
             return { isOpen: false, closesSoon: false, label: yValue };

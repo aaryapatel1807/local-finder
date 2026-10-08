@@ -26,7 +26,7 @@ async function fetchRoute(
     const res = await fetch(
       `/api/route?from=${from.lat},${from.lng}&to=${to.lat},${to.lng}&mode=${mode}`
     )
-    if (!res.ok) return null // 503 ROUTE_UNAVAILABLE → treat as unknown
+    if (!res.ok) return null // non-200 (400/429) → treat as unknown; OSRM failures now return 200 with estimated: true
     const body = await res.json().catch(() => null)
     if (typeof body?.durationMin !== 'number') return null
     return {

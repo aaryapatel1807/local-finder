@@ -48,6 +48,7 @@ export const PlaceSchema = z.object({
   openLabel: z.string().optional(),
   isOpen: z.boolean().nullable(),
   closesSoon: z.boolean(),
+  minutesToClose: z.number().optional(),
   hoursToday: z.string().optional(),
   weeklyHours: z.record(z.string(), z.string()).optional(),
   lat: z.number(),
@@ -85,6 +86,11 @@ export const ParsedQuerySchema = z.object({
         .max(3),
     })
     .optional(),
+  /**
+   * Detected query language: 'hi' for Hindi, 'gu' for Gujarati
+   * (Devanagari/Gujarati script or transliterated). Omitted for English.
+   */
+  detectedLang: z.enum(["hi", "gu", "en"]).optional(),
 });
 
 export type ParsedQuery = z.infer<typeof ParsedQuerySchema>;
@@ -101,6 +107,12 @@ export const ReviewSummarySchema = z.object({
   basedOn: z.number().int(),
   tags: z.array(z.string()).optional(),
   sentiment: z.number().min(-1).max(1).optional(),
+  /**
+   * One-line busy/quiet hint from the SAME summarize call (zero extra
+   * cost), e.g. "busy evenings, quiet before noon". The model omits it
+   * unless the reviews actually support it.
+   */
+  bestTimeHint: z.string().optional(),
 });
 
 /** Shared radiusKm validation (1 | 3 | 5 | 10 km). */

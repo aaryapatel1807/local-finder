@@ -1,12 +1,14 @@
 /**
  * GET /api/route?from=lat,lng&to=lat,lng&mode=walk|drive — directions.
  *
- * Response: 200 { durationMin, distanceKm, mode, cached }
- *           400 INVALID_INPUT | 429 RATE_LIMITED
- *           503 { error: { code: "ROUTE_UNAVAILABLE" } } on ANY OSRM/network
- *           failure.
+ * Response: 200 { durationMin, distanceKm, mode, estimated, cached }
+ *           400 INVALID_INPUT | 429 RATE_LIMITED.
  *
- * Cached 24h. OSRM demo server is keyless and ₹0.
+ * OSRM demo server (keyless, ₹0) is tried first; when it is unreachable
+ * or fails, a haversine estimate is returned instead
+ * ({ estimated: true }) — valid input never 503s. Estimates are not
+ * cached, so a later request can pick up a real OSRM route on recovery.
+ * Cached 24h (real routes only).
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -17,6 +19,7 @@ import { cacheGet, cacheSet } from "@/lib/cache";
 import {
   ROUTE_CACHE_TTL_SEC,
   computeRoute,
+  haversineEstimate,
   parseLatLng,
   routeCacheKey,
   type RouteResult,
@@ -72,11 +75,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     await cacheSet(key, result, ROUTE_CACHE_TTL_SEC);
     return NextResponse.json({ ...result, cached: false });
   } catch {
-    // ANY OSRM/network failure -> 503, never a throw.
-    return apiError(
-      "ROUTE_UNAVAILABLE",
-      "Could not compute the route",
-      503
-    );
+    // ANY OSRM/network failure -> haversine estimate (never cached).
+    const estimated = haversineEstimate(from, to, mode);
+    return NextResponse.json({ ...estimated, cached: false });
   }
 }

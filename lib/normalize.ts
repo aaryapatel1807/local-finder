@@ -149,6 +149,7 @@ export function normalizePlace(
     openLabel: openStateRaw,
     isOpen: status.isOpen,
     closesSoon: status.closesSoon,
+    minutesToClose: status.minutesToClose,
     hoursToday,
     weeklyHours,
     lat: hasCoords ? (lat as number) : 0,

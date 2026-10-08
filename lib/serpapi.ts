@@ -3,6 +3,7 @@
  *
  * - searchPlaces: engine=google_maps, type=search, reads `local_results`.
  * - fetchReviews: engine=google_maps_reviews, reads `reviews` (first 10).
+ * - fetchPhotos: engine=google_maps_photos, reads `photos[].image`.
  *
  * Every call is quota-guarded first and counted afterwards. Thrown errors
  * carry a `code` of QUOTA_EXCEEDED or UPSTREAM_ERROR so routes can map them
@@ -133,4 +134,45 @@ export async function fetchReviews(
   const reviews = json["reviews"];
   const list = Array.isArray(reviews) ? reviews : [];
   return (list as Record<string, unknown>[]).slice(0, 10);
+}
+
+export type FetchPhotosParams = { dataId: string; apiKey: string };
+
+/**
+ * Fetch photo URLs for one place via the google_maps_photos engine.
+ * Returns image URLs (full-size `image` preferred, `thumbnail` fallback).
+ * Callers cap the count; every photo object without a usable URL is
+ * skipped defensively.
+ */
+export async function fetchPhotos(
+  params: FetchPhotosParams
+): Promise<string[]> {
+  const { dataId, apiKey } = params;
+  await guardQuota();
+
+  const query = new URLSearchParams({
+    engine: "google_maps_photos",
+    data_id: dataId,
+    hl: "en",
+    api_key: apiKey,
+  });
+
+  const json = await serpGet(`https://serpapi.com/search.json?${query.toString()}`);
+  await incrementCalls(1);
+
+  const photos = json["photos"];
+  const list = Array.isArray(photos) ? photos : [];
+  const urls: string[] = [];
+  for (const p of list) {
+    if (typeof p !== "object" || p === null) continue;
+    const rec = p as Record<string, unknown>;
+    const url =
+      typeof rec["image"] === "string" && rec["image"]
+        ? (rec["image"] as string)
+        : typeof rec["thumbnail"] === "string" && rec["thumbnail"]
+          ? (rec["thumbnail"] as string)
+          : undefined;
+    if (url) urls.push(url);
+  }
+  return urls;
 }

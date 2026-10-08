@@ -10,9 +10,12 @@
  */
 
 import { z } from "zod";
+import { haversineKm } from "./distance";
 
 export const ROUTE_CACHE_TTL_SEC = 24 * 60 * 60; // 24h
 export const WALK_SPEED_KMH = 5;
+/** Assumed average driving speed for the haversine fallback estimate. */
+export const FALLBACK_DRIVE_SPEED_KMH = 30;
 
 export type LatLng = { lat: number; lng: number };
 
@@ -53,11 +56,13 @@ export type RouteResult = {
   durationMin: number;
   distanceKm: number;
   mode: "walk" | "drive";
+  /** true when the numbers are a haversine estimate, not an OSRM route. */
+  estimated: boolean;
 };
 
 /**
  * Compute the route via the OSRM demo server. Throws on ANY failure —
- * the handler maps it to 503 ROUTE_UNAVAILABLE.
+ * the handler falls back to haversineEstimate in that case.
  */
 export async function computeRoute(
   from: LatLng,
@@ -84,5 +89,27 @@ export async function computeRoute(
     durationMin: Math.round(minutes),
     distanceKm: Math.round(distanceKm * 10) / 10,
     mode,
+    estimated: false,
+  };
+}
+
+/**
+ * Haversine fallback estimate for when OSRM is unreachable.
+ * walk minutes = distanceKm / 5 * 60; drive minutes = distanceKm / 30 * 60.
+ * Pure function — easy to test. Estimates are never cached (a later
+ * request may get a real OSRM route once the service recovers).
+ */
+export function haversineEstimate(
+  from: LatLng,
+  to: LatLng,
+  mode: "walk" | "drive"
+): RouteResult {
+  const distanceKm = haversineKm(from.lat, from.lng, to.lat, to.lng);
+  const speedKmh = mode === "drive" ? FALLBACK_DRIVE_SPEED_KMH : WALK_SPEED_KMH;
+  return {
+    durationMin: Math.round((distanceKm / speedKmh) * 60),
+    distanceKm: Math.round(distanceKm * 10) / 10,
+    mode,
+    estimated: true,
   };
 }
