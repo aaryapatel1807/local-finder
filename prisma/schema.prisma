@@ -1,0 +1,56 @@
+// Prisma schema for Local Finder (optional database).
+// The app runs fully without DATABASE_URL set; favorites then fall back
+// to localStorage on the frontend and the quota counter stays in memory.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String     @id @default(cuid())
+  email     String?    @unique
+  createdAt DateTime   @default(now())
+  favorites Favorite[]
+  searches  Search[]
+}
+
+model Favorite {
+  id        String   @id @default(cuid())
+  userId    String
+  placeId   String
+  name      String
+  address   String?
+  lat       Float
+  lng       Float
+  rating    Float?
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, placeId])
+}
+
+model Search {
+  id        String   @id @default(cuid())
+  userId    String?
+  query     String
+  lat       Float
+  lng       Float
+  radiusKm  Int
+  results   Int
+  cached    Boolean
+  createdAt DateTime @default(now())
+  user      User?    @relation(fields: [userId], references: [id])
+
+  @@index([createdAt])
+}
+
+model ApiUsage {
+  id    String @id @default(cuid())
+  month String @unique // e.g. "2026-10"
+  calls Int    @default(0)
+}

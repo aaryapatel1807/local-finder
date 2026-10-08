@@ -1,0 +1,89 @@
+/**
+ * Zod schemas shared by the API routes.
+ * These validate every request body and the AI layer's JSON output.
+ */
+import { z } from "zod";
+
+/**
+ * POST /api/search request body.
+ * radiusKm is one of 1 | 3 | 5 | 10 (arrives as a JSON number).
+ */
+export const SearchRequestSchema = z.object({
+  query: z.string().min(1, "query is required").max(120),
+  lat: z.number().min(-90).max(90),
+  lng: z.number().min(-180).max(180),
+  radiusKm: z
+    .number()
+    .refine((v) => [1, 3, 5, 10].includes(v), {
+      message: "radiusKm must be one of 1, 3, 5, 10",
+    }),
+});
+
+/** POST /api/parse request body. */
+export const ParseRequestSchema = z.object({
+  text: z.string().min(1, "text is required").max(300),
+});
+
+/** POST /api/reviews request body. */
+export const ReviewsRequestSchema = z.object({
+  dataId: z.string().min(1, "dataId is required"),
+  placeName: z.string().min(1, "placeName is required").max(120),
+});
+
+/**
+ * Normalized place shape (spec section 7.4). Used to validate the favorite
+ * payload so a bad client can't stash arbitrary blobs in the DB.
+ */
+export const PlaceSchema = z.object({
+  id: z.string(),
+  dataId: z.string().optional(),
+  name: z.string(),
+  category: z.string().optional(),
+  rating: z.number().optional(),
+  reviews: z.number().int().optional(),
+  price: z.string().optional(),
+  address: z.string().optional(),
+  phone: z.string().optional(),
+  website: z.string().optional(),
+  openLabel: z.string().optional(),
+  isOpen: z.boolean().nullable(),
+  closesSoon: z.boolean(),
+  hoursToday: z.string().optional(),
+  weeklyHours: z.record(z.string(), z.string()).optional(),
+  lat: z.number(),
+  lng: z.number(),
+  distanceKm: z.number().optional(),
+  thumbnail: z.string().optional(),
+  score: z.number().optional(),
+});
+
+export type Place = z.infer<typeof PlaceSchema>;
+
+/** POST /api/favorites request body. */
+export const FavoriteBodySchema = z.object({
+  place: PlaceSchema,
+});
+
+/**
+ * Output contract for the AI query parser (spec 8.4).
+ * priceMax: 0 = cheapest .. 4 = most expensive (optional, model may omit).
+ */
+export const ParsedQuerySchema = z.object({
+  query: z.string().min(1),
+  openNow: z.boolean().default(false),
+  priceMax: z.number().int().min(0).max(4).optional(),
+  near: z.string().optional(),
+  sort: z.enum(["best", "nearest", "rating", "reviews"]).default("best"),
+});
+
+export type ParsedQuery = z.infer<typeof ParsedQuerySchema>;
+
+/** AI review-summary output contract (spec 8.3). */
+export const ReviewSummarySchema = z.object({
+  summary: z.string(),
+  pros: z.array(z.string()).max(3),
+  cons: z.array(z.string()).max(3),
+  basedOn: z.number().int(),
+});
+
+export type ReviewSummary = z.infer<typeof ReviewSummarySchema>;
