@@ -199,6 +199,6 @@ describe("hiddenGemIdSet", () => {
       { id: "d", rating: 4.0, reviews: 400 },
     ];
     const gems = hiddenGemIdSet(places);
-    for (const id of gems) expect(typeof id).toBe("string");
+    for (const id of Array.from(gems)) expect(typeof id).toBe("string");
   });
 });
