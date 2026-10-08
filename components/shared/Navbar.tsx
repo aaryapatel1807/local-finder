@@ -6,11 +6,11 @@ import LanguageSwitcher from '../LanguageSwitcher'
 import { useTheme } from './ThemeContext'
 import { useLocation } from './LocationContext'
 
-function getGreeting() {
-  const hour = new Date().getHours()
-  if (hour < 12) return 'Good Morning'
-  if (hour < 17) return 'Good Afternoon'
-  return 'Good Evening'
+/** Hour-bucketed greeting key — rendered through t() in the component. */
+function greetingKey(hour: number): 'nav.morning' | 'nav.afternoon' | 'nav.evening' {
+  if (hour < 12) return 'nav.morning'
+  if (hour < 17) return 'nav.afternoon'
+  return 'nav.evening'
 }
 
 interface NavbarProps {
@@ -23,7 +23,7 @@ export default function Navbar({ onMenuClick = () => {}, collapsed = false, onTo
   const isMobile = useIsMobile()
   const { theme, toggleTheme } = useTheme()
   const { locationLabel, radiusKm } = useLocation()
-  const { lang, setLang } = useLanguage()
+  const { lang, setLang, t } = useLanguage()
 
   return (
     <div className="app-chrome app-chrome--merged" style={{
@@ -44,7 +44,7 @@ export default function Navbar({ onMenuClick = () => {}, collapsed = false, onTo
           {isMobile && (
             <button
               onClick={onMenuClick}
-              aria-label="Open menu"
+              aria-label={t('nav.openMenu')}
               style={{
                 background: 'transparent',
                 border: 'none',
@@ -62,8 +62,8 @@ export default function Navbar({ onMenuClick = () => {}, collapsed = false, onTo
           {!isMobile && (
             <button
               onClick={onToggleCollapse}
-              aria-label={collapsed ? 'Expand sidebar' : 'Minimise sidebar'}
-              title={collapsed ? 'Expand sidebar' : 'Minimise sidebar'}
+              aria-label={t(collapsed ? 'nav.expand' : 'nav.collapse')}
+              title={t(collapsed ? 'nav.expand' : 'nav.collapse')}
               aria-expanded={!collapsed}
               style={{
                 background: 'transparent',
@@ -86,7 +86,7 @@ export default function Navbar({ onMenuClick = () => {}, collapsed = false, onTo
             </h1>
             {!isMobile && (
               <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '2px' }}>
-                {getGreeting()} — find what you need nearby
+                {t(greetingKey(new Date().getHours()))} — {t('nav.subtitle')}
               </div>
             )}
           </div>
@@ -94,7 +94,7 @@ export default function Navbar({ onMenuClick = () => {}, collapsed = false, onTo
 
         {/* Center: location pill */}
         <div
-          aria-label={`Location: ${locationLabel}, radius ${radiusKm} kilometres`}
+          aria-label={t('nav.locationAria', { label: locationLabel, radius: radiusKm })}
           style={{
             display: 'inline-flex',
             alignItems: 'center',
@@ -114,7 +114,7 @@ export default function Navbar({ onMenuClick = () => {}, collapsed = false, onTo
           }}
         >
           <MapPin size={isMobile ? 12 : 14} style={{ color: 'var(--accent-deep)' }} />
-          <span>{locationLabel} · {radiusKm} km</span>
+          <span>{locationLabel} · {t('filters.radiusUnit', { n: radiusKm })}</span>
         </div>
 
         {/* Right Side */}
@@ -125,8 +125,8 @@ export default function Navbar({ onMenuClick = () => {}, collapsed = false, onTo
           {/* Theme toggle */}
           <button
             onClick={toggleTheme}
-            aria-label={theme === 'light' ? 'Switch to dark theme' : 'Switch to light theme'}
-            title={theme === 'light' ? 'Dark theme' : 'Light theme'}
+            aria-label={t(theme === 'light' ? 'nav.toDark' : 'nav.toLight')}
+            title={t(theme === 'light' ? 'nav.themeDark' : 'nav.themeLight')}
             style={{
               background: 'var(--track)',
               border: '1px solid var(--border)',
@@ -143,7 +143,7 @@ export default function Navbar({ onMenuClick = () => {}, collapsed = false, onTo
 
           {/* Bell Icon */}
           {!isMobile && (
-            <button aria-label="Notifications" style={{
+            <button aria-label={t('nav.notifications')} style={{
               background: 'transparent',
               border: 'none',
               color: 'var(--text-muted)',

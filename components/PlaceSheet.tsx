@@ -11,6 +11,7 @@ import Skeleton from './ui/skeleton'
 import RouteBadge from './RouteBadge'
 import { useRouteTime, type RouteMode } from '../hooks/useRouteTime'
 import { useShell } from './shared/LayoutShell'
+import { useLanguage } from '../hooks/useLanguage'
 
 interface PlaceSheetProps {
   place: Place | null
@@ -37,20 +38,23 @@ interface ReviewsResponse extends ReviewSummary {
   bestTimeHint?: string
 }
 
-/** Server tag slugs → human labels; unknown tags render as-is. */
+/** Server tag slugs → dictionary keys; unknown tags render as-is (kept English). */
 export const TAG_LABELS: Record<string, string> = {
-  'late-night': 'Open late',
-  'family-friendly': 'Family friendly',
-  budget: 'Budget',
-  'quick-service': 'Quick service',
-  hygienic: 'Hygienic',
-  spacious: 'Spacious',
-  parking: 'Parking',
-  delivery: 'Delivery',
+  'late-night': 'tag.lateNight',
+  'family-friendly': 'tag.familyFriendly',
+  budget: 'tag.budget',
+  'quick-service': 'tag.quickService',
+  hygienic: 'tag.hygienic',
+  spacious: 'tag.spacious',
+  parking: 'tag.parking',
+  delivery: 'tag.delivery',
 }
 
-const tagLabel = (tag: string) =>
-  TAG_LABELS[tag] ?? tag.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+/** Translates a known tag slug; unknown tags render title-cased as-is. */
+const tagLabel = (tag: string, t: (key: string) => string) =>
+  TAG_LABELS[tag]
+    ? t(TAG_LABELS[tag])
+    : tag.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 
 /** AI review summary — lazy POST /api/reviews, hidden when aiDisabled or null summary. */
 function ReviewSummarySection({
@@ -61,6 +65,7 @@ function ReviewSummarySection({
   onAiDisabled?: () => void
   onReviewsLoaded?: (placeId: string, sentiment?: number) => void
 }) {
+  const { t } = useLanguage()
   const [summary, setSummary] = useState<ReviewsResponse | null>(null)
   const [loading, setLoading] = useState(false)
 
@@ -94,10 +99,10 @@ function ReviewSummarySection({
   if (!loading && !summary) return null // hidden entirely when the summary is null
 
   return (
-    <section aria-label="AI review summary" style={{ marginTop: '16px' }}>
+    <section aria-label={t('sheet.reviewsSection')} style={{ marginTop: '16px' }}>
       <h4 style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: 700, marginBottom: '8px' }}>
         <Sparkles size={14} style={{ color: 'var(--accent-purple)' }} />
-        From recent reviews
+        {t('sheet.fromReviews')}
       </h4>
       {loading ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
@@ -108,26 +113,26 @@ function ReviewSummarySection({
         <div style={{ fontSize: '0.85rem', color: 'var(--text-faint)', lineHeight: 1.55 }}>
           <p style={{ marginBottom: '8px' }}>{summary.summary}</p>
           {summary.pros && summary.pros.length > 0 && (
-            <p style={{ marginBottom: '4px' }}><strong style={{ color: '#16A34A' }}>Liked:</strong> {summary.pros.join(' · ')}</p>
+            <p style={{ marginBottom: '4px' }}><strong style={{ color: '#16A34A' }}>{t('sheet.liked')}</strong> {summary.pros.join(' · ')}</p>
           )}
           {summary.cons && summary.cons.length > 0 && (
-            <p style={{ marginBottom: '8px' }}><strong style={{ color: '#DC2626' }}>Complaints:</strong> {summary.cons.join(' · ')}</p>
+            <p style={{ marginBottom: '8px' }}><strong style={{ color: '#DC2626' }}>{t('sheet.complaints')}</strong> {summary.cons.join(' · ')}</p>
           )}
           {summary.tags && summary.tags.length > 0 && (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }} aria-label="Good for">
-              {summary.tags.map(t => (
-                <span key={t} className="chip chip-purple" style={{ fontSize: '0.75rem' }}>
-                  {tagLabel(t)}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }} aria-label={t('sheet.goodFor')}>
+              {summary.tags.map(tag => (
+                <span key={tag} className="chip chip-purple" style={{ fontSize: '0.75rem' }}>
+                  {tagLabel(tag, t)}
                 </span>
               ))}
             </div>
           )}
           {summary.bestTimeHint && (
-            <p style={{ marginBottom: '4px' }}>🕐 Best time: {summary.bestTimeHint}</p>
+            <p style={{ marginBottom: '4px' }}>🕐 {t('sheet.bestTime', { hint: summary.bestTimeHint })}</p>
           )}
           {summary.basedOn ? (
             <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '6px' }}>
-              Based on {summary.basedOn} reviews
+              {t('sheet.basedOn', { count: summary.basedOn })}
             </p>
           ) : null}
         </div>
@@ -149,6 +154,7 @@ function AskAboutPlace({
   aiDisabled?: boolean
   onAiDisabled?: () => void
 }) {
+  const { t } = useLanguage()
   const [question, setQuestion] = useState('')
   const [answer, setAnswer] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -184,28 +190,28 @@ function AskAboutPlace({
       if (res.ok && typeof data?.answer === 'string' && data.answer.trim()) {
         setAnswer(data.answer)
       } else {
-        setError('Could not get an answer right now — try again later')
+        setError(t('sheet.askError'))
       }
     } catch {
-      setError('Could not get an answer right now — try again later')
+      setError(t('sheet.askError'))
     } finally {
       setLoading(false)
     }
   }
 
   return (
-    <section aria-label={`Ask about ${place.name}`} style={{ marginTop: '16px' }}>
+    <section aria-label={t('sheet.askAria', { name: place.name })} style={{ marginTop: '16px' }}>
       <h4 style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: 700, marginBottom: '8px' }}>
         <MessageCircle size={14} style={{ color: 'var(--accent-purple)' }} aria-hidden />
-        Ask about this place
+        {t('sheet.askTitle')}
       </h4>
       <form onSubmit={ask} style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
         <input
           type="text"
           value={question}
           onChange={e => setQuestion(e.target.value)}
-          placeholder="e.g. Is parking easy here?"
-          aria-label="Your question about this place"
+          placeholder={t('sheet.askPlaceholder')}
+          aria-label={t('sheet.askInputAria')}
           enterKeyHint="send"
           style={{
             flex: 1, minWidth: 0,
@@ -215,7 +221,7 @@ function AskAboutPlace({
           }}
         />
         <Button type="submit" variant="primary" disabled={!question.trim() || loading} style={{ padding: '10px 16px' }}>
-          {loading ? '…' : 'Ask'}
+          {loading ? '…' : t('sheet.askSubmit')}
         </Button>
       </form>
       {loading && (
@@ -231,7 +237,7 @@ function AskAboutPlace({
       {answer && (
         <div style={{ marginTop: '10px' }}>
           <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '4px' }}>
-            From recent reviews
+            {t('sheet.fromReviews')}
           </div>
           <p style={{ fontSize: '0.85rem', color: 'var(--text-faint)', lineHeight: 1.55 }}>{answer}</p>
         </div>
@@ -243,6 +249,7 @@ function AskAboutPlace({
 /** Photos — tap-to-load only (never auto-fetched). Hidden when there is no
  *  dataId or the server reports quota pressure (503 QUOTA_NEAR_LIMIT). */
 function PhotosSection({ place }: { place: Place }) {
+  const { t } = useLanguage()
   const [photos, setPhotos] = useState<string[] | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(false)
@@ -284,11 +291,11 @@ function PhotosSection({ place }: { place: Place }) {
   }
 
   return (
-    <section aria-label={`Photos of ${place.name}`} style={{ marginTop: '16px' }}>
-      <h4 style={{ fontSize: '0.85rem', fontWeight: 700, marginBottom: '8px' }}>Photos</h4>
+    <section aria-label={t('sheet.photosOf', { name: place.name })} style={{ marginTop: '16px' }}>
+      <h4 style={{ fontSize: '0.85rem', fontWeight: 700, marginBottom: '8px' }}>{t('sheet.photos')}</h4>
       {photos === null && !loading && !error && (
         <Button variant="ghost" onClick={load} style={{ fontSize: '0.82rem' }}>
-          Load photos
+          {t('sheet.loadPhotos')}
         </Button>
       )}
       {loading && (
@@ -298,13 +305,13 @@ function PhotosSection({ place }: { place: Place }) {
       )}
       {error && (
         <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-          Could not load photos.{' '}
+          {t('sheet.photosError')}{' '}
           <button
             type="button"
             onClick={load}
             style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--accent-deep)', fontSize: '0.82rem', fontWeight: 600, fontFamily: "'Satoshi', sans-serif", textDecoration: 'underline' }}
           >
-            Retry
+            {t('sheet.retry')}
           </button>
         </div>
       )}
@@ -319,7 +326,7 @@ function PhotosSection({ place }: { place: Place }) {
             <img
               key={i}
               src={u}
-              alt={`${place.name} photo ${i + 1}`}
+              alt={t('sheet.photoAlt', { name: place.name, n: i + 1 })}
               loading="lazy"
               style={{ width: 160, height: 120, objectFit: 'cover', borderRadius: '14px', scrollSnapAlign: 'start', flexShrink: 0 }}
             />
@@ -334,6 +341,7 @@ export default function PlaceSheet({
   onReviewsLoaded, userCoords, emergency,
 }: PlaceSheetProps) {
   const { collapsed, isMobile } = useShell()
+  const { t } = useLanguage()
   const [hoursOpen, setHoursOpen] = useState(false)
   const [imgFailed, setImgFailed] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -404,7 +412,7 @@ export default function PlaceSheet({
       <div
         role="dialog"
         aria-modal={isMobile}
-        aria-label={`${place.name} details`}
+        aria-label={t('sheet.details', { name: place.name })}
         className="app-chrome"
         style={{
           ...panelStyle,
@@ -419,7 +427,7 @@ export default function PlaceSheet({
           <button
             type="button"
             onClick={onClose}
-            aria-label="Close details"
+            aria-label={t('sheet.close')}
             style={{
               position: 'absolute', top: '12px', right: '12px', zIndex: 2,
               background: 'var(--track)', border: '1px solid var(--border)',
@@ -434,7 +442,7 @@ export default function PlaceSheet({
           {place.thumbnail && !imgFailed ? (
             <img
               src={place.thumbnail}
-              alt={`Photo of ${place.name}`}
+              alt={t('sheet.photoOf', { name: place.name })}
               loading="lazy"
               onError={() => setImgFailed(true)}
               style={{ width: '100%', height: 180, borderRadius: '18px', objectFit: 'cover', marginBottom: '14px', display: 'block' }}
@@ -452,7 +460,7 @@ export default function PlaceSheet({
               href={mapsSearchUrl}
               target="_blank"
               rel="noopener noreferrer"
-              aria-label={`Open ${place.name} in Google Maps`}
+              aria-label={t('sheet.openInMaps', { name: place.name })}
               style={{ color: 'var(--text-muted)', padding: '4px', flexShrink: 0 }}
             >
               <Globe size={16} />
@@ -465,7 +473,7 @@ export default function PlaceSheet({
               <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>{place.rating.toFixed(1)}</span>
             )}
             {place.reviews !== undefined && place.reviews !== null && (
-              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{place.reviews.toLocaleString()} reviews</span>
+              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{t('card.reviews', { count: place.reviews.toLocaleString() })}</span>
             )}
             {place.price && (
               <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 600 }}>{place.price}</span>
@@ -493,7 +501,7 @@ export default function PlaceSheet({
                     fontFamily: "'Satoshi', sans-serif",
                   }}
                 >
-                  Weekly hours
+                  {t('sheet.weeklyHours')}
                   <ChevronDown size={14} style={{ transform: hoursOpen ? 'rotate(180deg)' : undefined, transition: 'transform 0.2s' }} />
                 </button>
                 {hoursOpen && (
@@ -517,7 +525,7 @@ export default function PlaceSheet({
               <button
                 type="button"
                 onClick={copyAddress}
-                aria-label="Copy address"
+                aria-label={t('sheet.copyAddress')}
                 style={{
                   background: 'var(--track)', border: '1px solid var(--border)', borderRadius: '10px',
                   padding: '7px', color: 'var(--text-primary)', cursor: 'pointer', flexShrink: 0,
@@ -528,18 +536,18 @@ export default function PlaceSheet({
               </button>
             </div>
           )}
-          {copied && <div role="status" style={{ fontSize: '0.75rem', color: 'var(--accent-deep)', marginTop: '4px' }}>Address copied</div>}
+          {copied && <div role="status" style={{ fontSize: '0.75rem', color: 'var(--accent-deep)', marginTop: '4px' }}>{t('sheet.addressCopied')}</div>}
 
           {place.distanceKm !== undefined && (
             <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '8px' }}>
-              {formatDistance(place.distanceKm)} away
+              {t('sheet.away', { distance: formatDistance(place.distanceKm) })}
             </div>
           )}
 
           {/* route time with walk/drive toggle */}
           {userCoords && (
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px', flexWrap: 'wrap' }}>
-              <div role="group" aria-label="Route mode" style={{ display: 'inline-flex', gap: '6px' }}>
+              <div role="group" aria-label={t('sheet.routeMode')} style={{ display: 'inline-flex', gap: '6px' }}>
                 {(['walk', 'drive'] as RouteMode[]).map(m => {
                   const active = routeMode === m
                   const Icon = m === 'walk' ? Footprints : Car
@@ -552,7 +560,7 @@ export default function PlaceSheet({
                       className={active ? 'chip chip-green' : 'chip chip-muted'}
                       style={{ cursor: 'pointer', fontFamily: "'Satoshi', sans-serif", display: 'inline-flex', alignItems: 'center', gap: '5px' }}
                     >
-                      <Icon size={13} aria-hidden /> {m === 'walk' ? 'Walk' : 'Drive'}
+                      <Icon size={13} aria-hidden /> {t(m === 'walk' ? 'sheet.walk' : 'sheet.drive')}
                     </button>
                   )
                 })}
@@ -571,7 +579,7 @@ export default function PlaceSheet({
             }}
           >
             {place.phone && (
-              <a href={`tel:${place.phone}`} aria-label={`Call ${place.name}`}>
+              <a href={`tel:${place.phone}`} aria-label={t('sheet.callAria', { name: place.name })}>
                 <Button
                   variant="ghost"
                   className="w-full"
@@ -582,19 +590,19 @@ export default function PlaceSheet({
                     fontWeight: emergency ? 700 : undefined,
                   }}
                 >
-                  <Phone size={emergency ? 24 : 18} /> Call
+                  <Phone size={emergency ? 24 : 18} /> {t('sheet.call')}
                 </Button>
               </a>
             )}
-            <a href={directionsUrl} target="_blank" rel="noopener noreferrer" aria-label={`Get directions to ${place.name}`}>
+            <a href={directionsUrl} target="_blank" rel="noopener noreferrer" aria-label={t('sheet.directionsAria', { name: place.name })}>
               <Button variant="ghost" className="w-full" style={{ flexDirection: 'column', gap: 4, padding: '12px 8px', fontSize: '0.75rem' }}>
-                <Navigation size={18} /> Directions
+                <Navigation size={18} /> {t('sheet.directions')}
               </Button>
             </a>
             {place.website && (
-              <a href={place.website} target="_blank" rel="noopener noreferrer" aria-label={`Visit ${place.name} website`}>
+              <a href={place.website} target="_blank" rel="noopener noreferrer" aria-label={t('sheet.websiteAria', { name: place.name })}>
                 <Button variant="ghost" className="w-full" style={{ flexDirection: 'column', gap: 4, padding: '12px 8px', fontSize: '0.75rem' }}>
-                  <Globe size={18} /> Website
+                  <Globe size={18} /> {t('sheet.website')}
                 </Button>
               </a>
             )}
@@ -604,24 +612,24 @@ export default function PlaceSheet({
               aria-pressed={isFavorite}
               style={{ flexDirection: 'column', gap: 4, padding: '12px 8px', fontSize: '0.75rem', color: isFavorite ? '#E14E42' : undefined }}
             >
-              <Heart size={18} fill={isFavorite ? '#E14E42' : 'transparent'} /> {isFavorite ? 'Saved' : 'Save'}
+              <Heart size={18} fill={isFavorite ? '#E14E42' : 'transparent'} /> {t(isFavorite ? 'sheet.saved' : 'sheet.save')}
             </Button>
             <Button
               variant="ghost"
               onClick={() => onShare(place)}
-              aria-label={`Share ${place.name}`}
+              aria-label={t('sheet.shareAria', { name: place.name })}
               style={{ flexDirection: 'column', gap: 4, padding: '12px 8px', fontSize: '0.75rem' }}
             >
-              <Share2 size={18} /> Share
+              <Share2 size={18} /> {t('sheet.share')}
             </Button>
             <a
               href={whatsappShareUrl(place)}
               target="_blank"
               rel="noopener noreferrer"
-              aria-label={`Share ${place.name} on WhatsApp`}
+              aria-label={t('sheet.whatsappAria', { name: place.name })}
             >
               <Button variant="ghost" className="w-full" style={{ flexDirection: 'column', gap: 4, padding: '12px 8px', fontSize: '0.75rem' }}>
-                <MessageCircle size={18} /> WhatsApp
+                <MessageCircle size={18} /> {t('sheet.whatsapp')}
               </Button>
             </a>
           </div>
@@ -633,7 +641,7 @@ export default function PlaceSheet({
           <AskAboutPlace place={place} aiDisabled={aiDisabled} onAiDisabled={onAiDisabled} />
 
           <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '18px', lineHeight: 1.5 }}>
-            Your location is sent to our server only to find places near you.
+            {t('sheet.privacy')}
           </p>
         </div>
       </div>
