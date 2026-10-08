@@ -1,10 +1,24 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
+import { z } from "zod";
 import {
   isAiEnabled,
   parseQuery,
   parseFallback,
   summarizeReviews,
+  askGroqJson,
+  PARSE_SYSTEM_PROMPT,
+  SUMMARIZE_SYSTEM_PROMPT,
 } from "./ai";
+
+function mockGroq(content: string) {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ choices: [{ message: { content } }] }),
+    })
+  );
+}
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -78,6 +92,84 @@ describe("parseQuery fallback", () => {
   });
 });
 
+describe("parseQuery ambiguity", () => {
+  it("returns ambiguous options when the model detects an ambiguous term", async () => {
+    vi.stubEnv("GROQ_API_KEY", "gsk_test");
+    mockGroq(
+      '{"query":"apple","openNow":false,"sort":"best","ambiguous":{"term":"apple","options":[{"label":"Electronics store","query":"apple store"},{"label":"Juice shop","query":"apple juice shop"}]}}'
+    );
+    const out = await parseQuery("apple near me");
+    expect(out.query).toBe("apple");
+    expect(out.ambiguous).toEqual({
+      term: "apple",
+      options: [
+        { label: "Electronics store", query: "apple store" },
+        { label: "Juice shop", query: "apple juice shop" },
+      ],
+    });
+  });
+
+  it("omits ambiguous when the model does not set it", async () => {
+    vi.stubEnv("GROQ_API_KEY", "gsk_test");
+    mockGroq('{"query":"pharmacy","openNow":false,"sort":"best"}');
+    const out = await parseQuery("pharmacy");
+    expect(out.ambiguous).toBeUndefined();
+  });
+
+  it("falls back when ambiguous has fewer than 2 options", async () => {
+    vi.stubEnv("GROQ_API_KEY", "gsk_test");
+    mockGroq(
+      '{"query":"bank","ambiguous":{"term":"bank","options":[{"label":"Bank","query":"bank"}]}}'
+    );
+    const out = await parseQuery("bank");
+    expect(out).toEqual(parseFallback("bank"));
+  });
+});
+
+describe("PARSE_SYSTEM_PROMPT", () => {
+  it("carries ambiguity-detection and typo-tolerance guidance", () => {
+    expect(PARSE_SYSTEM_PROMPT).toContain("ambiguous");
+    expect(PARSE_SYSTEM_PROMPT).toContain("pharmasy");
+    expect(PARSE_SYSTEM_PROMPT).toContain("davakhana");
+    expect(PARSE_SYSTEM_PROMPT).toContain("medikal");
+    expect(PARSE_SYSTEM_PROMPT).toContain("Omit");
+  });
+});
+
+describe("SUMMARIZE_SYSTEM_PROMPT", () => {
+  it("asks for tags from the fixed allowlist and a -1..1 sentiment", () => {
+    expect(SUMMARIZE_SYSTEM_PROMPT).toContain("late-night");
+    expect(SUMMARIZE_SYSTEM_PROMPT).toContain("family-friendly");
+    expect(SUMMARIZE_SYSTEM_PROMPT).toContain("sentiment");
+  });
+});
+
+describe("askGroqJson", () => {
+  const PickSchema = z.object({ placeId: z.string() });
+
+  it("throws when AI is disabled", async () => {
+    vi.stubEnv("GROQ_API_KEY", "");
+    await expect(
+      askGroqJson("sys", "user", PickSchema)
+    ).rejects.toThrow();
+  });
+
+  it("returns schema-validated JSON", async () => {
+    vi.stubEnv("GROQ_API_KEY", "gsk_test");
+    mockGroq('{"placeId": "abc123"}');
+    const out = await askGroqJson("sys", "user", PickSchema);
+    expect(out).toEqual({ placeId: "abc123" });
+  });
+
+  it("throws on schema mismatch", async () => {
+    vi.stubEnv("GROQ_API_KEY", "gsk_test");
+    mockGroq('{"wrong": true}');
+    await expect(
+      askGroqJson("sys", "user", PickSchema)
+    ).rejects.toThrow();
+  });
+});
+
 describe("summarizeReviews", () => {
   it("throws when AI is disabled so callers hide the feature", async () => {
     vi.stubEnv("GROQ_API_KEY", "");
@@ -89,5 +181,46 @@ describe("summarizeReviews", () => {
   it("throws when there is no review text", async () => {
     vi.stubEnv("GROQ_API_KEY", "gsk_test");
     await expect(summarizeReviews([], "X")).rejects.toThrow();
+  });
+
+  it("passes through tags and sentiment from the same call", async () => {
+    vi.stubEnv("GROQ_API_KEY", "gsk_test");
+    mockGroq(
+      '{"summary":"Clean and fast.","pros":["clean"],"cons":["pricey"],"basedOn":2,"tags":["hygienic","quick-service"],"sentiment":0.7}'
+    );
+    const out = await summarizeReviews(
+      [
+        { snippet: "Very clean and fast service", rating: 5 },
+        { snippet: "A bit pricey but quick", rating: 4 },
+      ],
+      "Test Place"
+    );
+    expect(out.summary).toBe("Clean and fast.");
+    expect(out.tags).toEqual(["hygienic", "quick-service"]);
+    expect(out.sentiment).toBe(0.7);
+    expect(out.basedOn).toBe(2);
+  });
+
+  it("leaves tags/sentiment undefined when the model omits them", async () => {
+    vi.stubEnv("GROQ_API_KEY", "gsk_test");
+    mockGroq(
+      '{"summary":"Okay.","pros":[],"cons":[],"basedOn":1}'
+    );
+    const out = await summarizeReviews(
+      [{ snippet: "It was okay", rating: 3 }],
+      "Test Place"
+    );
+    expect(out.tags).toBeUndefined();
+    expect(out.sentiment).toBeUndefined();
+  });
+
+  it("rejects an out-of-range sentiment", async () => {
+    vi.stubEnv("GROQ_API_KEY", "gsk_test");
+    mockGroq(
+      '{"summary":"Okay.","pros":[],"cons":[],"basedOn":1,"sentiment":5}'
+    );
+    await expect(
+      summarizeReviews([{ snippet: "okay", rating: 3 }], "X")
+    ).rejects.toThrow("invalid summary JSON");
   });
 });

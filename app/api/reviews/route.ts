@@ -47,6 +47,8 @@ type MockReviewsFile = {
       summary?: string;
       pros?: string[];
       cons?: string[];
+      tags?: string[];
+      sentiment?: number;
     }
   >;
 };
@@ -58,11 +60,15 @@ async function loadMockSummary(
   const json = JSON.parse(await readFile(file, "utf8")) as MockReviewsFile;
   const entry = json.reviews_by_data_id?.[dataId];
   if (!entry) return null;
+  // tags/sentiment pass through when present (phase 2); absent in older
+  // mock entries, which stay backward compatible.
   return {
     summary: entry.summary ?? "",
     pros: entry.pros ?? [],
     cons: entry.cons ?? [],
     basedOn: entry.reviews?.length ?? 0,
+    ...(entry.tags ? { tags: entry.tags } : {}),
+    ...(typeof entry.sentiment === "number" ? { sentiment: entry.sentiment } : {}),
   };
 }
 

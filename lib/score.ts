@@ -60,22 +60,52 @@ export type ScoreInput = {
   distanceKm?: number;
 };
 
+const round1 = (n: number): number => Math.round(n * 10) / 10;
+
 /**
  * Best-match score, 0..100.
  *
- * score = 100 * ( 0.45 * (bayes/5) + 0.35 * proximity + 0.20 * openBonus )
+ * Without sentiment (undefined) the formula is EXACTLY the original:
+ *   score = 100 * ( 0.45 * (bayes/5) + 0.35 * proximity + 0.20 * openBonus )
  * proximity = max(0, 1 - distanceKm / radiusKm)
+ *
+ * With sentiment defined (-1..1, clamped) the weights rebalance to make
+ * room for the review-sentiment signal:
+ *   score = 100 * ( 0.40 * (bayes/5) + 0.30 * proximity
+ *                 + 0.15 * openBonus + 0.15 * sentiment01 )
+ * where sentiment01 = (clamp(sentiment) + 1) / 2.
  */
 export function scorePlace(
   place: ScoreInput,
   radiusKm: number,
-  meanRating: number = FALLBACK_MEAN_RATING
+  meanRating: number = FALLBACK_MEAN_RATING,
+  sentiment?: number
 ): number {
   const bayes = bayesianAverage(place.rating, place.reviews, meanRating);
   const distance = place.distanceKm ?? radiusKm; // unknown distance => worst proximity
   const proximity = Math.max(0, 1 - distance / radiusKm);
+  const bonus = openBonus(place.isOpen ?? null);
+
+  if (sentiment === undefined || !Number.isFinite(sentiment)) {
+    const score = 100 * (0.45 * (bayes / 5) + 0.35 * proximity + 0.2 * bonus);
+    return round1(score);
+  }
+
+  const sentiment01 = (Math.max(-1, Math.min(1, sentiment)) + 1) / 2;
   const score =
     100 *
-    (0.45 * (bayes / 5) + 0.35 * proximity + 0.2 * openBonus(place.isOpen ?? null));
-  return Math.round(score * 10) / 10;
+    (0.4 * (bayes / 5) + 0.3 * proximity + 0.15 * bonus + 0.15 * sentiment01);
+  return round1(score);
+}
+
+/**
+ * Client-side score nudge from review sentiment. Pure function, no imports.
+ * No-op when sentiment is undefined: returns the score unchanged.
+ * Otherwise shifts the 0..100 score by up to ±5 points by sentiment
+ * (clamped to -1..1, result clamped to 0..100, rounded to 1 decimal).
+ */
+export function blendSentiment(score: number, sentiment?: number): number {
+  if (sentiment === undefined || !Number.isFinite(sentiment)) return score;
+  const clamped = Math.max(-1, Math.min(1, sentiment));
+  return round1(Math.max(0, Math.min(100, score + clamped * 5)));
 }

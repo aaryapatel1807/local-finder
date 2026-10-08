@@ -67,6 +67,8 @@ export const FavoriteBodySchema = z.object({
 /**
  * Output contract for the AI query parser (spec 8.4).
  * priceMax: 0 = cheapest .. 4 = most expensive (optional, model may omit).
+ * ambiguous: set ONLY when the search term is genuinely ambiguous (the
+ * model offers 2-3 disambiguated options); omitted otherwise.
  */
 export const ParsedQuerySchema = z.object({
   query: z.string().min(1),
@@ -74,16 +76,44 @@ export const ParsedQuerySchema = z.object({
   priceMax: z.number().int().min(0).max(4).optional(),
   near: z.string().optional(),
   sort: z.enum(["best", "nearest", "rating", "reviews"]).default("best"),
+  ambiguous: z
+    .object({
+      term: z.string(),
+      options: z
+        .array(z.object({ label: z.string(), query: z.string() }))
+        .min(2)
+        .max(3),
+    })
+    .optional(),
 });
 
 export type ParsedQuery = z.infer<typeof ParsedQuerySchema>;
 
-/** AI review-summary output contract (spec 8.3). */
+/**
+ * AI review-summary output contract (spec 8.3).
+ * tags/sentiment come from the same summarize call (phase 2); both
+ * optional so older caches and mock entries stay valid.
+ */
 export const ReviewSummarySchema = z.object({
   summary: z.string(),
   pros: z.array(z.string()).max(3),
   cons: z.array(z.string()).max(3),
   basedOn: z.number().int(),
+  tags: z.array(z.string()).optional(),
+  sentiment: z.number().min(-1).max(1).optional(),
+});
+
+/** Shared radiusKm validation (1 | 3 | 5 | 10 km). */
+const RadiusKmSchema = z.number().refine((v) => [1, 3, 5, 10].includes(v), {
+  message: "radiusKm must be one of 1, 3, 5, 10",
+});
+
+/** POST /api/answer request body: a natural-language question + location. */
+export const AnswerRequestSchema = z.object({
+  text: z.string().min(1, "text is required").max(300),
+  lat: z.number().min(-90).max(90),
+  lng: z.number().min(-180).max(180),
+  radiusKm: RadiusKmSchema,
 });
 
 export type ReviewSummary = z.infer<typeof ReviewSummarySchema>;

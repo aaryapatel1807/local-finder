@@ -11,7 +11,9 @@ export type ErrorCode =
   | "RATE_LIMITED"
   | "QUOTA_EXCEEDED"
   | "UPSTREAM_ERROR"
-  | "NOT_FOUND";
+  | "NOT_FOUND"
+  | "NO_RESULTS"
+  | "ROUTE_UNAVAILABLE";
 
 export function apiError(
   code: ErrorCode,
