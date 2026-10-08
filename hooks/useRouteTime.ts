@@ -6,6 +6,8 @@ export type RouteMode = 'walk' | 'drive'
 export interface RouteInfo {
   durationMin: number
   distanceKm: number
+  /** True when the server fell back to an estimate (OSRM unavailable). */
+  estimated?: boolean
 }
 
 /** 24h in-memory cache, shared across hook instances (module scope). */
@@ -30,6 +32,7 @@ async function fetchRoute(
     return {
       durationMin: body.durationMin,
       distanceKm: typeof body.distanceKm === 'number' ? body.distanceKm : 0,
+      estimated: body.estimated === true,
     }
   } catch {
     return null

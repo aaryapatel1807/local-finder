@@ -9,7 +9,8 @@ interface RouteBadgeProps {
   mode?: RouteMode
 }
 
-/** Travel-time pill, e.g. "12 min walk" / "8 min drive". */
+/** Travel-time pill, e.g. "12 min walk" / "8 min drive".
+ *  Shows a "~" prefix when the server fell back to an estimate. */
 export default function RouteBadge({ route, mode = 'walk' }: RouteBadgeProps) {
   if (!route || !Number.isFinite(route.durationMin)) return null
   const mins = Math.max(1, Math.round(route.durationMin))
@@ -21,7 +22,7 @@ export default function RouteBadge({ route, mode = 'walk' }: RouteBadgeProps) {
       border="rgba(21,178,207,0.28)"
     >
       <Icon size={12} aria-hidden />
-      {mins} min {mode}
+      {route.estimated ? '~' : ''}{mins} min {mode}
     </Badge>
   )
 }

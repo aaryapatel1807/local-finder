@@ -1,7 +1,19 @@
 'use client'
-import { FormEvent, useState } from 'react'
-import { Search, Sparkles, X } from 'lucide-react'
+import { FormEvent, useEffect, useRef, useState } from 'react'
+import { Mic, Search, Sparkles, X } from 'lucide-react'
 import Button from './ui/button'
+
+/** Minimal structural type for the Web Speech API recognition object. */
+interface WebkitSpeechRecognitionLike {
+  lang: string
+  interimResults: boolean
+  maxAlternatives: number
+  onresult: ((e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null
+  onend: (() => void) | null
+  onerror: (() => void) | null
+  start: () => void
+  stop: () => void
+}
 
 interface SearchBarProps {
   value: string
@@ -23,6 +35,58 @@ export default function SearchBar({
   value, onChange, onSubmit, aiDisabled, onParse, parsing, recentSearches, onRecentSelect,
 }: SearchBarProps) {
   const [focused, setFocused] = useState(false)
+  const [listening, setListening] = useState(false)
+  const [speechSupported, setSpeechSupported] = useState(false)
+  const recogRef = useRef<{ stop: () => void } | null>(null)
+
+  // Web Speech API — feature-detect on mount (SSR-safe).
+  useEffect(() => {
+    const SR = (window as unknown as {
+      SpeechRecognition?: new () => WebkitSpeechRecognitionLike
+      webkitSpeechRecognition?: new () => WebkitSpeechRecognitionLike
+    }).SpeechRecognition ?? (window as unknown as {
+      webkitSpeechRecognition?: new () => WebkitSpeechRecognitionLike
+    }).webkitSpeechRecognition
+    setSpeechSupported(!!SR)
+    return () => { recogRef.current?.stop() }
+  }, [])
+
+  const toggleListening = () => {
+    if (listening) {
+      recogRef.current?.stop()
+      return
+    }
+    const w = window as unknown as {
+      SpeechRecognition?: new () => WebkitSpeechRecognitionLike
+      webkitSpeechRecognition?: new () => WebkitSpeechRecognitionLike
+    }
+    const SR = w.SpeechRecognition ?? w.webkitSpeechRecognition
+    if (!SR) return
+    const recog = new SR()
+    recog.lang = 'en-IN'
+    recog.interimResults = false
+    recog.maxAlternatives = 1
+    recog.onresult = (e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => {
+      const transcript = e.results[0]?.[0]?.transcript
+      if (transcript) onChange(transcript) // into the input only — no auto-submit
+    }
+    recog.onend = () => {
+      setListening(false)
+      recogRef.current = null
+    }
+    recog.onerror = () => {
+      setListening(false)
+      recogRef.current = null
+    }
+    recogRef.current = recog
+    try {
+      recog.start()
+      setListening(true)
+    } catch {
+      setListening(false)
+      recogRef.current = null
+    }
+  }
 
   const submit = (e: FormEvent) => {
     e.preventDefault()
@@ -87,6 +151,26 @@ export default function SearchBar({
             }}
           >
             <X size={15} />
+          </button>
+        )}
+        {speechSupported && (
+          <button
+            type="button"
+            onClick={toggleListening}
+            aria-label={listening ? 'Stop voice input' : 'Search by voice'}
+            aria-pressed={listening}
+            title="Search by voice"
+            style={{
+              background: listening ? 'rgba(217,119,6,0.18)' : 'transparent',
+              border: 'none',
+              borderRadius: '50%',
+              width: 36, height: 36,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              color: listening ? '#D97706' : 'var(--text-muted)',
+              cursor: 'pointer', flexShrink: 0,
+            }}
+          >
+            <Mic size={17} className={listening ? 'animate-pulse' : undefined} />
           </button>
         )}
         {!aiDisabled && onParse && (

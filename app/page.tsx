@@ -23,11 +23,12 @@ import Button from '../components/ui/button'
 import { useGeolocation, CITY_FALLBACKS, type CityOption, type Coords } from '../hooks/useGeolocation'
 import { useSearch } from '../hooks/useSearch'
 import { useFavorites } from '../hooks/useFavorites'
+import { useHealth } from '../hooks/useHealth'
 import { useLocalStorage } from '../hooks/useLocalStorage'
 import type { Place, ParseResponse, ParsedQueryResult } from '../components/types'
-import { mapParseSort, sortPlaces } from '../components/types'
+import { mapParseSort, sortPlaces, formatDistance } from '../components/types'
 import { isQuestionLike } from '../lib/question'
-import { blendSentiment } from '../lib/score'
+import { bayesianAverage, blendSentiment, meanRatingOf } from '../lib/score'
 
 /**
  * CONTRACT NOTE: components/types.ts carries the Phase 2 fields
@@ -99,7 +100,10 @@ function HomeContent() {
   const [parsing, setParsing] = useState(false)
   const [pendingPlaceId, setPendingPlaceId] = useState<string | null>(null)
   const [recentSearches, setRecentSearches] = useLocalStorage<string[]>('localfinder_recent_searches', [])
+  const [recentlyViewed, setRecentlyViewed] = useLocalStorage<Place[]>('localfinder_recently_viewed', [])
   const [urlInitDone, setUrlInitDone] = useState(false)
+  const [emergency, setEmergency] = useState(false)
+  const health = useHealth()
 
   // ── Phase 2: ambiguity, anchor, answer, compare, picker ──────────────────
   const [ambiguity, setAmbiguity] = useState<AmbiguityState | null>(null)
@@ -181,6 +185,7 @@ function HomeContent() {
   const runSearch = useCallback((q: string) => {
     const query = q.trim()
     if (!query) return
+    setEmergency(false)
     setSubmittedQuery(query)
     setInput(query)
     setViewMode('list')
@@ -270,12 +275,35 @@ function HomeContent() {
       ?? null
   }, [answer, results])
 
-  // ── Compare ──────────────────────────────────────────────────────────────
+  // ── Hidden gems: top-quartile Bayesian rating with <100 reviews ────────────
+  const hiddenGemIds = useMemo(() => {
+    const ids = new Set<string>()
+    if (results.length < 4) return ids
+    const mean = meanRatingOf(results)
+    const scored = results
+      .map(p => ({ id: p.id, b: bayesianAverage(p.rating, p.reviews, mean), r: p.reviews ?? 0 }))
+      .sort((x, y) => y.b - x.b)
+    const cutoff = scored[Math.ceil(scored.length / 4) - 1].b
+    for (const s of scored) {
+      if (s.b >= cutoff && s.r < 100) ids.add(s.id)
+    }
+    return ids
+  }, [results])
+
+  // ── Surprise me ──────────────────────────────────────────────────────────
+  const openCount = useMemo(() => results.filter(p => p.isOpen === true).length, [results])
+  const surpriseMe = useCallback(() => {
+    const open = results.filter(p => p.isOpen === true)
+    if (open.length === 0) return
+    setSelectedPlace(open[Math.floor(Math.random() * open.length)])
+  }, [results])
+
+  // ── Compare (up to 3) ────────────────────────────────────────────────────
   const toggleCompare = useCallback((place: Place) => {
     setCompareIds(prev => {
       if (prev.includes(place.id)) return prev.filter(id => id !== place.id)
-      if (prev.length >= 2) {
-        showToast('Pick up to two places to compare')
+      if (prev.length >= 3) {
+        showToast('Pick up to three places to compare')
         return prev
       }
       return [...prev, place.id]
@@ -283,9 +311,11 @@ function HomeContent() {
   }, [showToast])
 
   const comparePlaces = useMemo(() => {
-    if (compareIds.length !== 2) return null
-    const [x, y] = compareIds.map(id => results.find(p => p.id === id))
-    return x && y ? ([x, y] as [Place, Place]) : null
+    if (compareIds.length < 2) return null
+    const found = compareIds
+      .map(id => results.find(p => p.id === id))
+      .filter((p): p is Place => !!p)
+    return found.length >= 2 ? found : null
   }, [compareIds, results])
 
   const clearCompare = useCallback(() => setCompareIds([]), [])
@@ -365,12 +395,22 @@ function HomeContent() {
   }, [setCoords, setLocationLabel, showToast])
 
   // ── Emergency mode ───────────────────────────────────────────────────────
-  const emergencySearch = useCallback(() => {
+  const emergencySearch = useCallback((q: string, toastMsg: string) => {
     setOpenNow(true)
     setSort('nearest')
-    runSearch('pharmacy')
-    showToast('Showing open pharmacies & clinics nearest you')
+    runSearch(q)
+    setEmergency(true)
+    showToast(toastMsg)
   }, [runSearch, showToast])
+
+  // ── Recently viewed ──────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!selectedPlace) return
+    setRecentlyViewed(prev =>
+      [selectedPlace, ...prev.filter(p => p.id !== selectedPlace.id)].slice(0, 6)
+    )
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedPlace])
 
   // Auto-open a shared place link once results arrive.
   useEffect(() => {
@@ -667,12 +707,21 @@ function HomeContent() {
             </div>
             <div style={{ display: 'inline-flex', gap: '6px', flexWrap: 'wrap' }}>
               <Button
+                variant="ghost"
+                onClick={surpriseMe}
+                disabled={openCount === 0}
+                title={openCount === 0 ? 'No open places right now' : 'Open a random open place'}
+                style={{ padding: '8px 14px' }}
+              >
+                🎲 Surprise me
+              </Button>
+              <Button
                 variant={compareMode ? 'primary' : 'ghost'}
                 onClick={() => { setCompareMode(m => !m); setCompareIds([]) }}
                 aria-pressed={compareMode}
                 style={{ padding: '8px 14px' }}
               >
-                Compare
+                Compare{compareIds.length > 0 ? ` (${compareIds.length})` : ''}
               </Button>
               <div role="group" aria-label="View mode" style={{ display: 'inline-flex', gap: '6px' }}>
                 <Button
@@ -746,8 +795,10 @@ function HomeContent() {
                   userCoords={coords}
                   selectable={compareMode}
                   compareSelected={compareIds.includes(place.id)}
-                  compareDisabled={compareIds.length >= 2}
+                  compareDisabled={compareIds.length >= 3}
                   onToggleCompare={toggleCompare}
+                  emergency={emergency}
+                  hiddenGem={hiddenGemIds.has(place.id)}
                 />
               </div>
             ))}
@@ -772,10 +823,76 @@ function HomeContent() {
               Type what you're looking for — or tap a category above. Results show ratings,
               hours, distance and directions from live Google Maps data.
             </p>
-            <Button variant="primary" onClick={emergencySearch}>
-              🚨 Open pharmacies near me
-            </Button>
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', flexWrap: 'wrap' }}>
+              <Button
+                variant="primary"
+                onClick={() => emergencySearch('pharmacy', 'Showing open pharmacies & clinics nearest you')}
+              >
+                🚨 Open pharmacies near me
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={() => emergencySearch('petrol pump', 'Showing open petrol pumps nearest you')}
+              >
+                ⛽ Petrol pumps open now
+              </Button>
+            </div>
           </GlassCard>
+        )}
+
+        {/* Recently viewed */}
+        {!hasSearched && !search.isLoading && recentlyViewed.length > 0 && (
+          <div>
+            <h3 style={{ fontSize: '0.9rem', fontWeight: 700, marginBottom: '8px' }}>Recently viewed</h3>
+            <div style={{ display: 'flex', gap: '10px', overflowX: 'auto', paddingBottom: '4px' }}>
+              {recentlyViewed.map(p => (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => setSelectedPlace(p)}
+                  aria-label={`View ${p.name}`}
+                  style={{
+                    flexShrink: 0, width: 150, textAlign: 'left', cursor: 'pointer',
+                    background: 'var(--glass-bg)',
+                    backdropFilter: 'blur(26px) saturate(1.6)',
+                    WebkitBackdropFilter: 'blur(26px) saturate(1.6)',
+                    border: '1px solid var(--glass-border)',
+                    borderRadius: '18px', padding: '10px',
+                    boxShadow: 'var(--glass-shadow)',
+                    fontFamily: "'Satoshi', sans-serif",
+                  }}
+                >
+                  {p.thumbnail ? (
+                    <img
+                      src={p.thumbnail}
+                      alt=""
+                      loading="lazy"
+                      style={{ width: '100%', height: 72, borderRadius: '12px', objectFit: 'cover', marginBottom: '6px', display: 'block' }}
+                    />
+                  ) : (
+                    <div
+                      aria-hidden
+                      style={{
+                        width: '100%', height: 72, borderRadius: '12px', marginBottom: '6px',
+                        background: 'linear-gradient(135deg, rgba(21,178,207,0.25), rgba(123,97,255,0.25))',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        color: 'var(--text-muted)', fontSize: '1.2rem', fontWeight: 700,
+                      }}
+                    >
+                      {p.name.charAt(0)}
+                    </div>
+                  )}
+                  <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {p.name}
+                  </div>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                    {p.rating !== undefined && p.rating !== null ? `★ ${p.rating.toFixed(1)}` : 'No rating'}
+                    {p.distanceKm !== undefined && ` · ${formatDistance(p.distanceKm)}`}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
         )}
 
         {/* Share current search */}
@@ -784,6 +901,13 @@ function HomeContent() {
             <Button variant="ghost" onClick={() => shareSearch()} style={{ fontSize: '0.82rem' }}>
               Share this search
             </Button>
+          </div>
+        )}
+
+        {/* Quota meter */}
+        {health?.callsThisMonth !== undefined && (
+          <div style={{ textAlign: 'center', fontSize: '0.72rem', color: 'var(--text-faint)' }} aria-live="polite">
+            {health.callsThisMonth} searches used this month
           </div>
         )}
       </div>
@@ -799,6 +923,7 @@ function HomeContent() {
         onAiDisabled={() => setAiDisabled(true)}
         onReviewsLoaded={handleReviewsLoaded}
         userCoords={coords}
+        emergency={emergency}
       />
 
       {/* Back to top */}
