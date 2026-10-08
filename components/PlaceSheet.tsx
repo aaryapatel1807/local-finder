@@ -1,13 +1,15 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
-  ChevronDown, Copy, Globe, Heart, Navigation, Phone, Share2, Sparkles, X,
+  Car, ChevronDown, Copy, Footprints, Globe, Heart, Navigation, Phone, Share2, Sparkles, X,
 } from 'lucide-react'
 import type { Place, ReviewSummary } from './types'
 import { formatDistance } from './types'
 import { StatusBadge, Stars } from './PlaceCard'
 import Button from './ui/button'
 import Skeleton from './ui/skeleton'
+import RouteBadge from './RouteBadge'
+import { useRouteTime, type RouteMode } from '../hooks/useRouteTime'
 import { useShell } from './shared/LayoutShell'
 
 interface PlaceSheetProps {
@@ -18,11 +20,44 @@ interface PlaceSheetProps {
   onShare: (place: Place) => void
   aiDisabled?: boolean
   onAiDisabled?: () => void
+  /** Called when the review summary arrives (placeId + optional sentiment for best-sort blending). */
+  onReviewsLoaded?: (placeId: string, sentiment?: number) => void
+  /** Optional user location — enables the walk/drive route time. */
+  userCoords?: { lat: number; lng: number } | null
 }
 
+/** CONTRACT NOTE: POST /api/reviews also returns `tags?: string[]` and
+ *  `sentiment?: number` (server contract), not yet in components/types.ts. */
+interface ReviewsResponse extends ReviewSummary {
+  tags?: string[]
+  sentiment?: number
+}
+
+/** Server tag slugs → human labels; unknown tags render as-is. */
+export const TAG_LABELS: Record<string, string> = {
+  'late-night': 'Open late',
+  'family-friendly': 'Family friendly',
+  budget: 'Budget',
+  'quick-service': 'Quick service',
+  hygienic: 'Hygienic',
+  spacious: 'Spacious',
+  parking: 'Parking',
+  delivery: 'Delivery',
+}
+
+const tagLabel = (tag: string) =>
+  TAG_LABELS[tag] ?? tag.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+
 /** AI review summary — lazy POST /api/reviews, hidden when aiDisabled or null summary. */
-function ReviewSummarySection({ place, aiDisabled, onAiDisabled }: { place: Place; aiDisabled?: boolean; onAiDisabled?: () => void }) {
-  const [summary, setSummary] = useState<ReviewSummary | null>(null)
+function ReviewSummarySection({
+  place, aiDisabled, onAiDisabled, onReviewsLoaded,
+}: {
+  place: Place
+  aiDisabled?: boolean
+  onAiDisabled?: () => void
+  onReviewsLoaded?: (placeId: string, sentiment?: number) => void
+}) {
+  const [summary, setSummary] = useState<ReviewsResponse | null>(null)
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
@@ -36,14 +71,15 @@ function ReviewSummarySection({ place, aiDisabled, onAiDisabled }: { place: Plac
       body: JSON.stringify({ dataId: place.dataId ?? place.id, placeName: place.name }),
     })
       .then(res => (res.ok ? res.json() : null))
-      .then(data => {
+      .then((data: ReviewsResponse | null) => {
         if (cancelled) return
         setLoading(false)
         if (data?.aiDisabled) {
           onAiDisabled?.()
           return
         }
-        if (data && data.summary) setSummary(data as ReviewSummary)
+        if (data && data.summary) setSummary(data)
+        if (data) onReviewsLoaded?.(place.id, data.sentiment)
       })
       .catch(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
@@ -71,7 +107,16 @@ function ReviewSummarySection({ place, aiDisabled, onAiDisabled }: { place: Plac
             <p style={{ marginBottom: '4px' }}><strong style={{ color: '#16A34A' }}>Liked:</strong> {summary.pros.join(' · ')}</p>
           )}
           {summary.cons && summary.cons.length > 0 && (
-            <p><strong style={{ color: '#DC2626' }}>Complaints:</strong> {summary.cons.join(' · ')}</p>
+            <p style={{ marginBottom: '8px' }}><strong style={{ color: '#DC2626' }}>Complaints:</strong> {summary.cons.join(' · ')}</p>
+          )}
+          {summary.tags && summary.tags.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }} aria-label="Good for">
+              {summary.tags.map(t => (
+                <span key={t} className="chip chip-purple" style={{ fontSize: '0.75rem' }}>
+                  {tagLabel(t)}
+                </span>
+              ))}
+            </div>
           )}
           {summary.basedOn ? (
             <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '6px' }}>
@@ -88,17 +133,25 @@ function ReviewSummarySection({ place, aiDisabled, onAiDisabled }: { place: Plac
  * Details sheet: bottom sheet on mobile, sidebar-aware side panel on desktop
  * (NutriAI overlay convention — sits beside the sidebar, widens when it collapses).
  */
-export default function PlaceSheet({ place, onClose, isFavorite, onToggleFavorite, onShare, aiDisabled, onAiDisabled }: PlaceSheetProps) {
+export default function PlaceSheet({
+  place, onClose, isFavorite, onToggleFavorite, onShare, aiDisabled, onAiDisabled,
+  onReviewsLoaded, userCoords,
+}: PlaceSheetProps) {
   const { collapsed, isMobile } = useShell()
   const [hoursOpen, setHoursOpen] = useState(false)
   const [imgFailed, setImgFailed] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [routeMode, setRouteMode] = useState<RouteMode>('walk')
 
   useEffect(() => {
     setHoursOpen(false)
     setImgFailed(false)
     setCopied(false)
+    setRouteMode('walk')
   }, [place?.id])
+
+  const places = useMemo(() => (place ? [place] : []), [place])
+  const routes = useRouteTime(userCoords, places, routeMode)
 
   // Escape to close.
   useEffect(() => {
@@ -287,6 +340,31 @@ export default function PlaceSheet({ place, onClose, isFavorite, onToggleFavorit
             </div>
           )}
 
+          {/* route time with walk/drive toggle */}
+          {userCoords && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px', flexWrap: 'wrap' }}>
+              <div role="group" aria-label="Route mode" style={{ display: 'inline-flex', gap: '6px' }}>
+                {(['walk', 'drive'] as RouteMode[]).map(m => {
+                  const active = routeMode === m
+                  const Icon = m === 'walk' ? Footprints : Car
+                  return (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => setRouteMode(m)}
+                      aria-pressed={active}
+                      className={active ? 'chip chip-green' : 'chip chip-muted'}
+                      style={{ cursor: 'pointer', fontFamily: "'Satoshi', sans-serif", display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+                    >
+                      <Icon size={13} aria-hidden /> {m === 'walk' ? 'Walk' : 'Drive'}
+                    </button>
+                  )
+                })}
+              </div>
+              <RouteBadge route={routes.get(place.id)} mode={routeMode} />
+            </div>
+          )}
+
           {/* action row */}
           <div
             style={{
@@ -333,7 +411,7 @@ export default function PlaceSheet({ place, onClose, isFavorite, onToggleFavorit
             </Button>
           </div>
 
-          <ReviewSummarySection place={place} aiDisabled={aiDisabled} onAiDisabled={onAiDisabled} />
+          <ReviewSummarySection place={place} aiDisabled={aiDisabled} onAiDisabled={onAiDisabled} onReviewsLoaded={onReviewsLoaded} />
 
           <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '18px', lineHeight: 1.5 }}>
             Your location is sent to our server only to find places near you.

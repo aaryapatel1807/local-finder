@@ -1,13 +1,13 @@
 'use client'
-import { Suspense, useCallback, useEffect, useMemo, useState } from 'react'
+import { FormEvent, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
-import { ArrowUp, List, LocateFixed, Map as MapIcon } from 'lucide-react'
+import { ArrowUp, List, LocateFixed, Map as MapIcon, MapPin, X } from 'lucide-react'
 import ScenicBackdrop from '../components/shared/ScenicBackdrop'
 import GlassCard from '../components/shared/GlassCard'
 import { useLocation } from '../components/shared/LocationContext'
 import SearchBar from '../components/SearchBar'
 import CategoryChips from '../components/CategoryChips'
-import FilterBar from '../components/FilterBar'
+import FilterBar, { type PriceBand, type SortKeyExt } from '../components/FilterBar'
 import PlaceCard from '../components/PlaceCard'
 import PlaceSheet from '../components/PlaceSheet'
 import MapView from '../components/MapView'
@@ -15,18 +15,72 @@ import SkeletonCard from '../components/SkeletonCard'
 import EmptyState from '../components/EmptyState'
 import ErrorState from '../components/ErrorState'
 import Toast from '../components/Toast'
+import AmbiguityChips from '../components/AmbiguityChips'
+import AnswerCard from '../components/AnswerCard'
+import CompareTable from '../components/CompareTable'
+import LocationPicker, { PINNED_STORAGE_KEY } from '../components/LocationPicker'
 import Button from '../components/ui/button'
-import { useGeolocation, CITY_FALLBACKS } from '../hooks/useGeolocation'
+import { useGeolocation, CITY_FALLBACKS, type CityOption, type Coords } from '../hooks/useGeolocation'
 import { useSearch } from '../hooks/useSearch'
 import { useFavorites } from '../hooks/useFavorites'
 import { useLocalStorage } from '../hooks/useLocalStorage'
-import type { Place, ParseResponse, SortKey } from '../components/types'
+import type { Place, ParseResponse, ParsedQueryResult } from '../components/types'
 import { mapParseSort, sortPlaces } from '../components/types'
+import { isQuestionLike } from '../lib/question'
+import { blendSentiment } from '../lib/score'
+
+/**
+ * CONTRACT NOTE: components/types.ts carries the Phase 2 fields
+ * (ParsedQueryResult.ambiguous, ReviewSummary.tags/sentiment, SortKey
+ * 'foryou') and lib/score.ts exports blendSentiment (per the server
+ * contract). The local extensions below (AmbiguousParsed, SortKeyExt)
+ * are written to compile with or without those fields present.
+ */
+interface AmbiguousParsed extends ParsedQueryResult {
+  ambiguous?: { term: string; options: { label: string; query: string }[] }
+}
+
+interface AmbiguityState {
+  term: string
+  options: { label: string; query: string }[]
+  originalText: string
+  openNow?: boolean
+  sort?: ParsedQueryResult['sort']
+  near?: string
+}
+
+interface AnswerState {
+  placeName: string
+  reasons: string[]
+  summary?: string | null
+}
+
+function matchesPriceBand(price: string | undefined, band: PriceBand): boolean {
+  if (band === 'any') return true
+  if (!price) return false
+  if (band === '₹') return price === '₹'
+  if (band === '₹₹') return price === '₹₹'
+  return price.length >= 3 // '₹₹₹+': three or more ₹ symbols
+}
+
+function readPinnedLocation(): Coords | null {
+  try {
+    const raw = window.localStorage.getItem(PINNED_STORAGE_KEY)
+    if (!raw) return null
+    const p = JSON.parse(raw) as { lat?: unknown; lng?: unknown }
+    if (typeof p?.lat === 'number' && typeof p?.lng === 'number' && Number.isFinite(p.lat) && Number.isFinite(p.lng)) {
+      return { lat: p.lat, lng: p.lng }
+    }
+  } catch {}
+  return null
+}
 
 function HomeContent() {
   const searchParams = useSearchParams()
   const { locationLabel, setLocationLabel, radiusKm, setRadiusKm } = useLocation()
-  const { coords, status: geoStatus, error: geoError, requestLocation, setCoords } = useGeolocation()
+  const {
+    coords, status: geoStatus, error: geoError, requestLocation, setCoords, accuracyMeters,
+  } = useGeolocation()
   const { favorites, isFavorite, toggle } = useFavorites()
   // The sibling's /api/health does not carry an aiDisabled flag; the AI routes
   // report it per-call instead, so we learn it lazily and hide AI UI after.
@@ -35,7 +89,8 @@ function HomeContent() {
   const [input, setInput] = useState('')
   const [submittedQuery, setSubmittedQuery] = useState('')
   const [openNow, setOpenNow] = useState(false)
-  const [sort, setSort] = useState<SortKey>('best')
+  const [sort, setSort] = useState<SortKeyExt>('best')
+  const [priceBand, setPriceBand] = useState<PriceBand>('any')
   const [viewMode, setViewMode] = useState<'list' | 'map'>('list')
   const [selectedPlace, setSelectedPlace] = useState<Place | null>(null)
   const [highlightId, setHighlightId] = useState<string | null>(null)
@@ -45,6 +100,18 @@ function HomeContent() {
   const [pendingPlaceId, setPendingPlaceId] = useState<string | null>(null)
   const [recentSearches, setRecentSearches] = useLocalStorage<string[]>('localfinder_recent_searches', [])
   const [urlInitDone, setUrlInitDone] = useState(false)
+
+  // ── Phase 2: ambiguity, anchor, answer, compare, picker ──────────────────
+  const [ambiguity, setAmbiguity] = useState<AmbiguityState | null>(null)
+  const [anchor, setAnchor] = useState<{ label: string } | null>(null)
+  const [answer, setAnswer] = useState<AnswerState | null>(null)
+  const [answerLoading, setAnswerLoading] = useState(false)
+  const [compareMode, setCompareMode] = useState(false)
+  const [compareIds, setCompareIds] = useState<string[]>([])
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [cityInput, setCityInput] = useState('')
+  const sentimentCacheRef = useRef(new Map<string, number>())
+  const [sentimentTick, setSentimentTick] = useState(0)
 
   const showToast = useCallback((msg: string) => {
     setToast(msg)
@@ -68,7 +135,14 @@ function HomeContent() {
       setCoords({ lat: Number(lat), lng: Number(lng) })
       setLocationLabel('Shared location')
     } else {
-      requestLocation() // browser location prompt on open (spec flow step 1)
+      // Pinned location (set on the map earlier) wins over a fresh geo fix.
+      const pin = readPinnedLocation()
+      if (pin) {
+        setCoords(pin)
+        setLocationLabel('Pinned location')
+      } else {
+        requestLocation() // browser location prompt on open (spec flow step 1)
+      }
     }
     if (q) {
       setInput(q)
@@ -87,7 +161,7 @@ function HomeContent() {
   }, [geoStatus])
 
   useEffect(() => {
-    if (geoStatus === 'denied' && !coords) {
+    if (geoStatus === 'denied' && !coords && !readPinnedLocation()) {
       // City fallback, default Vadodara (spec 2.1).
       const vadodara = CITY_FALLBACKS[0]
       setCoords({ lat: vadodara.lat, lng: vadodara.lng })
@@ -113,12 +187,190 @@ function HomeContent() {
     setRecentSearches(prev => [query, ...prev.filter(r => r.toLowerCase() !== query.toLowerCase())].slice(0, 5))
   }, [setRecentSearches])
 
-  // ── Results: open-now filter + client-side sort (no new API call) ─────────
+  // ── AI answer for question-like queries (POST /api/answer) ───────────────
+  const fetchAnswer = useCallback(async (text: string) => {
+    if (!coords || aiDisabled) return // no card without coords
+    setAnswerLoading(true)
+    setAnswer(null)
+    try {
+      const res = await fetch('/api/answer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, lat: coords.lat, lng: coords.lng, radiusKm }),
+      })
+      const body = await res.json().catch(() => null)
+      if (body?.aiDisabled) {
+        setAiDisabled(true)
+        return
+      }
+      const a = body?.answer
+      if (res.ok && a?.place) {
+        setAnswer({
+          placeName: typeof a.place === 'string' ? a.place : (a.place?.name ?? 'Top pick'),
+          reasons: Array.isArray(a.reasons) ? a.reasons : [],
+          summary: typeof a.summary === 'string' ? a.summary : null,
+        })
+      }
+      // answer null or AI disabled → the normal search (already running) stands alone
+    } catch {
+      /* fall back to normal search */
+    } finally {
+      setAnswerLoading(false)
+    }
+  }, [coords, radiusKm, aiDisabled])
+
+  /** Unified submit: question-like queries also fetch the AI answer card. */
+  const submitSearch = useCallback((text: string) => {
+    const t = text.trim()
+    if (!t) return
+    if (isQuestionLike(t)) {
+      void fetchAnswer(t)
+    } else {
+      setAnswer(null)
+      setAnswerLoading(false)
+    }
+    runSearch(t)
+  }, [fetchAnswer, runSearch])
+
+  // ── Results: open-now + price filters + client-side sort (no new API call) ─
   const results = useMemo(() => {
-    const places = search.data?.places ?? []
-    const filtered = openNow ? places.filter(p => p.isOpen === true) : places
-    return sortPlaces(filtered, sort)
-  }, [search.data, openNow, sort])
+    let places = search.data?.places ?? []
+    if (openNow) places = places.filter(p => p.isOpen === true)
+    if (priceBand !== 'any') places = places.filter(p => matchesPriceBand(p.price, priceBand))
+    if (sort === 'best' || sort === 'foryou') {
+      // 'foryou' behaves like 'best' until the personalized rerank hook lands.
+      const scored = places.map(p => ({
+        p,
+        s: blendSentiment(p.score ?? 0, sentimentCacheRef.current.get(p.id)),
+      }))
+      scored.sort((x, y) => y.s - x.s)
+      return scored.slice(0, 20).map(x => x.p)
+    }
+    return sortPlaces(places, sort)
+  }, [search.data, openNow, sort, priceBand, sentimentTick])
+
+  // Sentiment from loaded review summaries feeds the best-sort blend.
+  const handleReviewsLoaded = useCallback((placeId: string, sentiment?: number) => {
+    if (typeof sentiment !== 'number' || !Number.isFinite(sentiment)) return
+    if (sentimentCacheRef.current.get(placeId) !== sentiment) {
+      sentimentCacheRef.current.set(placeId, sentiment)
+      setSentimentTick(t => t + 1)
+    }
+  }, [])
+
+  // Match the answer card's place back to a result for "View details".
+  const answerPlaceMatch = useMemo(() => {
+    if (!answer) return null
+    const name = answer.placeName.toLowerCase()
+    return results.find(p => p.name.toLowerCase() === name)
+      ?? results.find(p =>
+        p.name.toLowerCase().includes(name) ||
+        (name.length > 3 && name.includes(p.name.toLowerCase()))
+      )
+      ?? null
+  }, [answer, results])
+
+  // ── Compare ──────────────────────────────────────────────────────────────
+  const toggleCompare = useCallback((place: Place) => {
+    setCompareIds(prev => {
+      if (prev.includes(place.id)) return prev.filter(id => id !== place.id)
+      if (prev.length >= 2) {
+        showToast('Pick up to two places to compare')
+        return prev
+      }
+      return [...prev, place.id]
+    })
+  }, [showToast])
+
+  const comparePlaces = useMemo(() => {
+    if (compareIds.length !== 2) return null
+    const [x, y] = compareIds.map(id => results.find(p => p.id === id))
+    return x && y ? ([x, y] as [Place, Place]) : null
+  }, [compareIds, results])
+
+  const clearCompare = useCallback(() => setCompareIds([]), [])
+
+  // ── "near" anchor: geocode the AI-parsed near field ──────────────────────
+  const resolveNear = useCallback(async (near: string) => {
+    const q = near.trim()
+    if (!q) return
+    try {
+      const res = await fetch(`/api/geocode?q=${encodeURIComponent(q)}`)
+      if (res.ok) {
+        const g = await res.json().catch(() => null)
+        if (g && Number.isFinite(g.lat) && Number.isFinite(g.lng)) {
+          setCoords({ lat: g.lat, lng: g.lng })
+          const label = typeof g.label === 'string' && g.label ? g.label : q
+          setLocationLabel(`near ${label}`)
+          setAnchor({ label })
+          showToast(`Searching near ${label}`)
+          return
+        }
+      }
+      // 404 NO_RESULTS or bad payload → keep current location
+      showToast(`Couldn't find "${q}" — using your current location`)
+    } catch {
+      showToast(`Couldn't find "${q}" — using your current location`)
+    }
+  }, [setCoords, setLocationLabel, showToast])
+
+  const clearAnchor = useCallback(() => {
+    setAnchor(null)
+    setLocationLabel('Near you')
+    requestLocation()
+  }, [requestLocation, setLocationLabel])
+
+  const useMyLocation = useCallback(() => {
+    setAnchor(null)
+    requestLocation()
+  }, [requestLocation])
+
+  // ── City text input fallback (replaces the hardcoded city select) ─────────
+  const submitCity = useCallback(async (e: FormEvent) => {
+    e.preventDefault()
+    const q = cityInput.trim()
+    if (!q) return
+    try {
+      const res = await fetch(`/api/geocode?q=${encodeURIComponent(q)}`)
+      if (res.ok) {
+        const g = await res.json().catch(() => null)
+        if (g && Number.isFinite(g.lat) && Number.isFinite(g.lng)) {
+          setCoords({ lat: g.lat, lng: g.lng })
+          setLocationLabel(typeof g.label === 'string' && g.label ? g.label : q)
+          setAnchor(null)
+          setCityInput('')
+          showToast(`Showing results for ${typeof g.label === 'string' && g.label ? g.label : q}`)
+          return
+        }
+      }
+      showToast(`Couldn't find "${q}" — try another city`)
+    } catch {
+      showToast('Could not look up that city')
+    }
+  }, [cityInput, setCoords, setLocationLabel, showToast])
+
+  const pickCity = useCallback((city: CityOption) => {
+    setCoords({ lat: city.lat, lng: city.lng })
+    setLocationLabel(city.name)
+    setAnchor(null)
+  }, [setCoords, setLocationLabel])
+
+  // ── Pinned location (set on the map) ─────────────────────────────────────
+  const handlePinConfirm = useCallback((c: Coords) => {
+    setCoords(c)
+    setLocationLabel('Pinned location')
+    setAnchor(null)
+    setPickerOpen(false)
+    showToast('Pinned location set')
+  }, [setCoords, setLocationLabel, showToast])
+
+  // ── Emergency mode ───────────────────────────────────────────────────────
+  const emergencySearch = useCallback(() => {
+    setOpenNow(true)
+    setSort('nearest')
+    runSearch('pharmacy')
+    showToast('Showing open pharmacies & clinics nearest you')
+  }, [runSearch, showToast])
 
   // Auto-open a shared place link once results arrive.
   useEffect(() => {
@@ -158,7 +410,14 @@ function HomeContent() {
     }
   }, [coords, submittedQuery, radiusKm, showToast])
 
-  // ── AI query parsing ─────────────────────────────────────────────────────
+  // ── AI query parsing (with disambiguation + near-anchor) ──────────────────
+  const applyParsedSearch = useCallback((parsed: ParsedQueryResult, query: string) => {
+    if (parsed.openNow) setOpenNow(true)
+    setSort(mapParseSort(parsed.sort))
+    if (parsed.near) void resolveNear(parsed.near)
+    runSearch(query)
+  }, [resolveNear, runSearch])
+
   const handleParse = useCallback(async (text: string) => {
     setParsing(true)
     try {
@@ -169,22 +428,51 @@ function HomeContent() {
       })
       const body = (await res.json().catch(() => null)) as ParseResponse | null
       if (body?.aiDisabled) setAiDisabled(true)
-      const parsed = body?.parsed
+      const parsed = body?.parsed as AmbiguousParsed | null
       if (res.ok && parsed?.query) {
-        if (parsed.openNow) setOpenNow(true)
-        setSort(mapParseSort(parsed.sort))
-        runSearch(parsed.query)
+        const amb = parsed.ambiguous
+        if (amb && Array.isArray(amb.options) && amb.options.length > 0) {
+          // Ambiguous — show "Did you mean…" chips, do NOT search yet.
+          setAmbiguity({
+            term: amb.term || text,
+            options: amb.options,
+            originalText: text,
+            openNow: parsed.openNow,
+            sort: parsed.sort,
+            near: parsed.near,
+          })
+        } else {
+          setAmbiguity(null)
+          applyParsedSearch(parsed, parsed.query)
+        }
       } else {
+        setAmbiguity(null)
         showToast('Could not understand that — searching as typed')
         runSearch(body?.fallbackQuery || text)
       }
     } catch {
+      setAmbiguity(null)
       showToast('Could not understand that — searching as typed')
       runSearch(text)
     } finally {
       setParsing(false)
     }
-  }, [runSearch, showToast])
+  }, [applyParsedSearch, runSearch, showToast])
+
+  const selectAmbiguity = (query: string) => {
+    if (ambiguity) {
+      if (ambiguity.openNow) setOpenNow(true)
+      setSort(mapParseSort(ambiguity.sort))
+      if (ambiguity.near) void resolveNear(ambiguity.near)
+    }
+    setAmbiguity(null)
+    runSearch(query)
+  }
+
+  const dismissAmbiguity = () => {
+    if (ambiguity) runSearch(ambiguity.originalText)
+    setAmbiguity(null)
+  }
 
   // ── Back to top ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -212,7 +500,7 @@ function HomeContent() {
         <SearchBar
           value={input}
           onChange={setInput}
-          onSubmit={runSearch}
+          onSubmit={submitSearch}
           aiDisabled={aiDisabled}
           onParse={handleParse}
           parsing={parsing}
@@ -223,6 +511,16 @@ function HomeContent() {
         {/* Quick categories */}
         <CategoryChips onSelect={runSearch} activeQuery={submittedQuery} />
 
+        {/* Disambiguation chips */}
+        {ambiguity && (
+          <AmbiguityChips
+            term={ambiguity.term}
+            options={ambiguity.options}
+            onSelect={selectAmbiguity}
+            onDismiss={dismissAmbiguity}
+          />
+        )}
+
         {/* Filters */}
         <FilterBar
           openNow={openNow}
@@ -231,37 +529,102 @@ function HomeContent() {
           onSortChange={setSort}
           radiusKm={radiusKm}
           onRadiusChange={setRadiusKm}
+          priceBand={priceBand}
+          onPriceBandChange={setPriceBand}
         />
 
-        {/* Location status / city fallback */}
+        {/* Location status (accuracy badge + set on map) */}
+        {geoStatus !== 'denied' && (
+          <div
+            style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', fontSize: '0.82rem', color: 'var(--text-muted)' }}
+            aria-live="polite"
+          >
+            <MapPin size={14} aria-hidden />
+            <span>{locationLabel}</span>
+            {geoStatus === 'granted' && accuracyMeters !== null && (
+              <span className="chip chip-muted" title="GPS fix accuracy">±{Math.round(accuracyMeters)} m</span>
+            )}
+            <button
+              type="button"
+              onClick={() => setPickerOpen(true)}
+              style={{
+                background: 'none', border: 'none', cursor: 'pointer', padding: '2px',
+                color: 'var(--accent-deep)', fontSize: '0.82rem', fontWeight: 600,
+                fontFamily: "'Satoshi', sans-serif", textDecoration: 'underline',
+              }}
+            >
+              Set on map
+            </button>
+            <button
+              type="button"
+              onClick={useMyLocation}
+              style={{
+                background: 'none', border: 'none', cursor: 'pointer', padding: '2px',
+                color: 'var(--accent-deep)', fontSize: '0.82rem', fontWeight: 600,
+                fontFamily: "'Satoshi', sans-serif", textDecoration: 'underline',
+              }}
+            >
+              Use my location
+            </button>
+          </div>
+        )}
+
+        {/* Location picker (set on map) */}
+        {pickerOpen && (
+          <LocationPicker
+            initialCoords={coords}
+            onConfirm={handlePinConfirm}
+            onCancel={() => setPickerOpen(false)}
+          />
+        )}
+
+        {/* Location unavailable → city text input + quick chips + set on map */}
         {geoStatus === 'denied' && (
           <GlassCard padding="p-4" className="flex flex-col gap-3">
             <div style={{ fontSize: '0.85rem', color: 'var(--text-faint)' }}>
               {geoError || 'Location unavailable.'} Set your area:
             </div>
-            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
-              <select
-                aria-label="Choose your city"
-                value={locationLabel}
-                onChange={e => {
-                  const city = CITY_FALLBACKS.find(c => c.name === e.target.value)
-                  if (city) {
-                    setCoords({ lat: city.lat, lng: city.lng })
-                    setLocationLabel(city.name)
-                  }
-                }}
+            <form
+              onSubmit={submitCity}
+              style={{ display: 'flex', gap: '8px', alignItems: 'center' }}
+              aria-label="Set your city"
+            >
+              <input
+                type="text"
+                value={cityInput}
+                onChange={e => setCityInput(e.target.value)}
+                placeholder="Type a city…"
+                aria-label="Type a city"
+                enterKeyHint="search"
                 style={{
-                  flex: 1, minWidth: 160,
+                  flex: 1, minWidth: 0,
                   background: 'var(--input-bg)', border: '1px solid var(--input-border)',
                   borderRadius: '12px', color: 'var(--text-primary)',
                   padding: '12px 14px', fontSize: '0.9rem', fontFamily: "'Satoshi', sans-serif",
                 }}
-              >
-                {CITY_FALLBACKS.map(c => (
-                  <option key={c.name} value={c.name}>{c.name}</option>
-                ))}
-              </select>
-              <Button variant="ghost" onClick={requestLocation}>
+              />
+              <Button type="submit" variant="primary" disabled={!cityInput.trim()} style={{ padding: '10px 18px' }}>
+                Set
+              </Button>
+            </form>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }} aria-label="Quick city picks">
+              {CITY_FALLBACKS.map(c => (
+                <button
+                  key={c.name}
+                  type="button"
+                  onClick={() => pickCity(c)}
+                  className="chip chip-muted"
+                  style={{ cursor: 'pointer', fontFamily: "'Satoshi', sans-serif", padding: '7px 13px' }}
+                >
+                  {c.name}
+                </button>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+              <Button variant="ghost" onClick={() => setPickerOpen(true)}>
+                <MapPin size={16} /> Set on map
+              </Button>
+              <Button variant="ghost" onClick={useMyLocation}>
                 <LocateFixed size={16} /> Retry location
               </Button>
             </div>
@@ -273,13 +636,26 @@ function HomeContent() {
           </div>
         )}
 
-        {/* Results header: count + view toggle + demo badge */}
+        {/* Results header: count + anchor + compare + view toggle + demo badge */}
         {hasSearched && (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
               <div aria-live="polite" style={{ fontSize: '0.9rem', fontWeight: 600 }}>
                 {search.isLoading ? 'Searching…' : search.data ? `${results.length} place${results.length === 1 ? '' : 's'} found` : ''}
               </div>
+              {anchor && (
+                <span className="chip chip-green" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }} title="Searching near this location">
+                  <MapPin size={12} aria-hidden /> near {anchor.label}
+                  <button
+                    type="button"
+                    onClick={clearAnchor}
+                    aria-label="Clear location anchor"
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', padding: 0, display: 'flex', alignItems: 'center' }}
+                  >
+                    <X size={13} />
+                  </button>
+                </span>
+              )}
               {search.data?.mock && (
                 <span className="chip chip-purple" title="Served from demo data instead of live SerpApi data">
                   Demo data
@@ -289,25 +665,47 @@ function HomeContent() {
                 <span className="chip chip-muted" title="Served from the server cache">Cached</span>
               )}
             </div>
-            <div role="group" aria-label="View mode" style={{ display: 'inline-flex', gap: '6px' }}>
+            <div style={{ display: 'inline-flex', gap: '6px', flexWrap: 'wrap' }}>
               <Button
-                variant={viewMode === 'list' ? 'primary' : 'ghost'}
-                onClick={() => setViewMode('list')}
-                aria-pressed={viewMode === 'list'}
+                variant={compareMode ? 'primary' : 'ghost'}
+                onClick={() => { setCompareMode(m => !m); setCompareIds([]) }}
+                aria-pressed={compareMode}
                 style={{ padding: '8px 14px' }}
               >
-                <List size={15} /> List
+                Compare
               </Button>
-              <Button
-                variant={viewMode === 'map' ? 'primary' : 'ghost'}
-                onClick={() => setViewMode('map')}
-                aria-pressed={viewMode === 'map'}
-                style={{ padding: '8px 14px' }}
-              >
-                <MapIcon size={15} /> Map
-              </Button>
+              <div role="group" aria-label="View mode" style={{ display: 'inline-flex', gap: '6px' }}>
+                <Button
+                  variant={viewMode === 'list' ? 'primary' : 'ghost'}
+                  onClick={() => setViewMode('list')}
+                  aria-pressed={viewMode === 'list'}
+                  style={{ padding: '8px 14px' }}
+                >
+                  <List size={15} /> List
+                </Button>
+                <Button
+                  variant={viewMode === 'map' ? 'primary' : 'ghost'}
+                  onClick={() => setViewMode('map')}
+                  aria-pressed={viewMode === 'map'}
+                  style={{ padding: '8px 14px' }}
+                >
+                  <MapIcon size={15} /> Map
+                </Button>
+              </div>
             </div>
           </div>
+        )}
+
+        {/* AI answer card above results */}
+        {hasSearched && (answer || answerLoading) && (
+          <AnswerCard
+            placeName={answer?.placeName ?? ''}
+            reasons={answer?.reasons ?? []}
+            summary={answer?.summary}
+            loading={answerLoading && !answer}
+            onOpenDetails={answerPlaceMatch ? () => setSelectedPlace(answerPlaceMatch) : undefined}
+            onDismiss={() => { setAnswer(null); setAnswerLoading(false) }}
+          />
         )}
 
         {/* Results body */}
@@ -325,6 +723,16 @@ function HomeContent() {
           <EmptyState onWidenRadius={radiusKm < 10 ? widenRadius : undefined} />
         )}
 
+        {/* Compare table */}
+        {!search.isLoading && !search.isError && hasSearched && viewMode === 'list' && compareMode && comparePlaces && (
+          <CompareTable
+            places={comparePlaces}
+            userCoords={coords}
+            onClose={() => setCompareMode(false)}
+            onClear={clearCompare}
+          />
+        )}
+
         {!search.isLoading && !search.isError && hasSearched && results.length > 0 && viewMode === 'list' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
             {results.map(place => (
@@ -335,6 +743,11 @@ function HomeContent() {
                   onToggleFavorite={toggle}
                   onOpen={setSelectedPlace}
                   highlighted={highlightId === place.id}
+                  userCoords={coords}
+                  selectable={compareMode}
+                  compareSelected={compareIds.includes(place.id)}
+                  compareDisabled={compareIds.length >= 2}
+                  onToggleCompare={toggleCompare}
                 />
               </div>
             ))}
@@ -355,10 +768,13 @@ function HomeContent() {
         {!hasSearched && !search.isLoading && (
           <GlassCard className="text-center" style={{ padding: '32px 24px' }}>
             <h2 style={{ fontSize: '1.3rem', marginBottom: '8px' }}>What do you need nearby?</h2>
-            <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', maxWidth: 420, margin: '0 auto' }}>
+            <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', maxWidth: 420, margin: '0 auto 16px' }}>
               Type what you're looking for — or tap a category above. Results show ratings,
               hours, distance and directions from live Google Maps data.
             </p>
+            <Button variant="primary" onClick={emergencySearch}>
+              🚨 Open pharmacies near me
+            </Button>
           </GlassCard>
         )}
 
@@ -381,6 +797,8 @@ function HomeContent() {
         onShare={shareSearch}
         aiDisabled={aiDisabled}
         onAiDisabled={() => setAiDisabled(true)}
+        onReviewsLoaded={handleReviewsLoaded}
+        userCoords={coords}
       />
 
       {/* Back to top */}

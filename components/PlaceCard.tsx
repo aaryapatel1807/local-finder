@@ -1,10 +1,12 @@
 'use client'
-import { useState } from 'react'
-import { Heart, Star } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { Check, Heart, Star } from 'lucide-react'
 import type { Place } from './types'
 import { formatDistance } from './types'
 import Badge from './ui/badge'
 import GlassCard from './shared/GlassCard'
+import RouteBadge from './RouteBadge'
+import { useRouteTime } from '../hooks/useRouteTime'
 
 export function StatusBadge({ place }: { place: Place }) {
   if (place.closesSoon) {
@@ -45,11 +47,24 @@ interface PlaceCardProps {
   onToggleFavorite: (place: Place) => void
   onOpen: (place: Place) => void
   highlighted?: boolean
+  /** Optional user location — enables the "N min walk" route badge. */
+  userCoords?: { lat: number; lng: number } | null
+  /** Compare mode: show a select checkbox (max 2 selected). */
+  selectable?: boolean
+  compareSelected?: boolean
+  compareDisabled?: boolean
+  onToggleCompare?: (place: Place) => void
 }
 
 /** Glass result card — the same component renders the Saved tab. */
-export default function PlaceCard({ place, isFavorite, onToggleFavorite, onOpen, highlighted }: PlaceCardProps) {
+export default function PlaceCard({
+  place, isFavorite, onToggleFavorite, onOpen, highlighted,
+  userCoords, selectable, compareSelected, compareDisabled, onToggleCompare,
+}: PlaceCardProps) {
   const [imgFailed, setImgFailed] = useState(false)
+  const places = useMemo(() => [place], [place])
+  const routes = useRouteTime(userCoords, places, 'walk')
+  const route = routes.get(place.id)
 
   return (
     <GlassCard
@@ -93,19 +108,43 @@ export default function PlaceCard({ place, isFavorite, onToggleFavorite, onOpen,
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '8px' }}>
           <h3 style={{ fontSize: '0.98rem', fontWeight: 600, lineHeight: 1.3 }}>{place.name}</h3>
-          <button
-            type="button"
-            onClick={e => { e.stopPropagation(); onToggleFavorite(place) }}
-            aria-label={isFavorite ? `Remove ${place.name} from saved` : `Save ${place.name}`}
-            aria-pressed={isFavorite}
-            style={{
-              background: 'transparent', border: 'none', cursor: 'pointer', padding: 4,
-              color: isFavorite ? '#E14E42' : 'var(--text-muted)', flexShrink: 0,
-              borderRadius: '8px',
-            }}
-          >
-            <Heart size={18} fill={isFavorite ? '#E14E42' : 'transparent'} />
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '2px', flexShrink: 0 }}>
+            {selectable && (
+              <button
+                type="button"
+                role="checkbox"
+                aria-checked={!!compareSelected}
+                aria-label={compareSelected ? `Remove ${place.name} from comparison` : `Select ${place.name} for comparison`}
+                disabled={!compareSelected && compareDisabled}
+                onClick={e => { e.stopPropagation(); onToggleCompare?.(place) }}
+                title={!compareSelected && compareDisabled ? 'Pick up to two places' : undefined}
+                style={{
+                  background: compareSelected ? 'var(--accent)' : 'var(--track)',
+                  border: `1px solid ${compareSelected ? 'var(--accent)' : 'var(--border)'}`,
+                  borderRadius: '8px', width: 26, height: 26,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  color: compareSelected ? '#fff' : 'var(--text-muted)',
+                  cursor: !compareSelected && compareDisabled ? 'not-allowed' : 'pointer',
+                  opacity: !compareSelected && compareDisabled ? 0.4 : 1,
+                }}
+              >
+                {compareSelected && <Check size={15} />}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={e => { e.stopPropagation(); onToggleFavorite(place) }}
+              aria-label={isFavorite ? `Remove ${place.name} from saved` : `Save ${place.name}`}
+              aria-pressed={isFavorite}
+              style={{
+                background: 'transparent', border: 'none', cursor: 'pointer', padding: 4,
+                color: isFavorite ? '#E14E42' : 'var(--text-muted)', flexShrink: 0,
+                borderRadius: '8px',
+              }}
+            >
+              <Heart size={18} fill={isFavorite ? '#E14E42' : 'transparent'} />
+            </button>
+          </div>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px', flexWrap: 'wrap' }}>
@@ -123,6 +162,7 @@ export default function PlaceCard({ place, isFavorite, onToggleFavorite, onOpen,
           {place.distanceKm !== undefined && (
             <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>{formatDistance(place.distanceKm)}</span>
           )}
+          <RouteBadge route={route} mode="walk" />
           {place.price && (
             <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 600 }}>{place.price}</span>
           )}
