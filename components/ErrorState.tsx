@@ -2,6 +2,7 @@
 import { AlertTriangle, CloudOff } from 'lucide-react'
 import GlassCard from './shared/GlassCard'
 import Button from './ui/button'
+import { useLanguage } from '../hooks/useLanguage'
 
 interface ErrorStateProps {
   /** Machine code from the API (QUOTA_EXCEEDED, RATE_LIMITED, …) */
@@ -12,12 +13,13 @@ interface ErrorStateProps {
 
 /** Error + quota-exceeded states (spec 7.8). */
 export default function ErrorState({ code, message, onRetry }: ErrorStateProps) {
+  const { t } = useLanguage()
   const isQuota = code === 'QUOTA_EXCEEDED'
   const title = isQuota
-    ? 'Search is busy right now'
+    ? t('error.quotaTitle')
     : code === 'RATE_LIMITED'
-      ? 'Too many searches'
-      : 'Something went wrong'
+      ? t('error.rateTitle')
+      : t('error.genericTitle')
 
   return (
     <GlassCard className="flex flex-col items-center text-center py-10 px-6">
@@ -34,12 +36,12 @@ export default function ErrorState({ code, message, onRetry }: ErrorStateProps) 
       <h3 style={{ fontSize: '1.05rem', marginBottom: 6 }}>{title}</h3>
       <p style={{ fontSize: '0.88rem', color: 'var(--text-muted)', maxWidth: 340, marginBottom: onRetry ? 14 : 0 }}>
         {isQuota
-          ? 'We\'ve used up our live place searches for now. Please wait a bit and try again.'
-          : (message || 'Couldn\'t reach the places service. Check your connection and try again.')}
+          ? t('error.quotaBody')
+          : (message || t('error.genericBody'))}
       </p>
       {onRetry && (
         <Button variant="ghost" onClick={onRetry}>
-          Try again
+          {t('error.retry')}
         </Button>
       )}
     </GlassCard>

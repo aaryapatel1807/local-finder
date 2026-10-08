@@ -2,9 +2,11 @@
 import { SearchX } from 'lucide-react'
 import GlassCard from './shared/GlassCard'
 import Button from './ui/button'
+import { useLanguage } from '../hooks/useLanguage'
 
 /** Empty results state (spec 2.1 + 7.8). */
 export default function EmptyState({ onWidenRadius }: { onWidenRadius?: () => void }) {
+  const { t } = useLanguage()
   return (
     <GlassCard className="flex flex-col items-center text-center py-10 px-6">
       <div
@@ -17,13 +19,13 @@ export default function EmptyState({ onWidenRadius }: { onWidenRadius?: () => vo
       >
         <SearchX size={26} />
       </div>
-      <h3 style={{ fontSize: '1.05rem', marginBottom: 6 }}>No places found</h3>
+      <h3 style={{ fontSize: '1.05rem', marginBottom: 6 }}>{t('empty.title')}</h3>
       <p style={{ fontSize: '0.88rem', color: 'var(--text-muted)', maxWidth: 320, marginBottom: onWidenRadius ? 14 : 0 }}>
-        Try a different search — or a wider radius to look further away.
+        {t('empty.body')}
       </p>
       {onWidenRadius && (
         <Button variant="primary" onClick={onWidenRadius}>
-          Widen the radius
+          {t('empty.widen')}
         </Button>
       )}
     </GlassCard>

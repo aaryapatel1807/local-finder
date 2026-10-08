@@ -1,6 +1,8 @@
 'use client'
 import { Bell, Menu, Sun, Moon, PanelLeftClose, PanelLeftOpen, MapPin } from 'lucide-react'
 import useIsMobile from '../../hooks/useIsMobile'
+import { useLanguage } from '../../hooks/useLanguage'
+import LanguageSwitcher from '../LanguageSwitcher'
 import { useTheme } from './ThemeContext'
 import { useLocation } from './LocationContext'
 
@@ -21,6 +23,7 @@ export default function Navbar({ onMenuClick = () => {}, collapsed = false, onTo
   const isMobile = useIsMobile()
   const { theme, toggleTheme } = useTheme()
   const { locationLabel, radiusKm } = useLocation()
+  const { lang, setLang } = useLanguage()
 
   return (
     <div className="app-chrome app-chrome--merged" style={{
@@ -116,6 +119,9 @@ export default function Navbar({ onMenuClick = () => {}, collapsed = false, onTo
 
         {/* Right Side */}
         <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? '8px' : '16px' }}>
+          {/* Language */}
+          <LanguageSwitcher value={lang} onChange={setLang} />
+
           {/* Theme toggle */}
           <button
             onClick={toggleTheme}
