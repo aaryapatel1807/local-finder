@@ -4,6 +4,7 @@ import { motion, type Variants } from 'framer-motion'
 import { ChevronRight, ChevronsLeft, Heart, MapPin } from 'lucide-react'
 import { usePathname } from 'next/navigation'
 import useIsMobile from '../../hooks/useIsMobile'
+import { useLanguage } from '../../hooks/useLanguage'
 
 interface NavEntry {
   icon: React.ReactNode
@@ -39,11 +40,12 @@ interface AppSidebarProps {
 export default function AppSidebar({ mobileOpen = false, onNavigate = () => {}, collapsed = false, onToggleCollapse = () => {} }: AppSidebarProps) {
   const pathname = usePathname()
   const isMobile = useIsMobile()
+  const { t } = useLanguage()
 
   const icon = (C: any) => <C className="h-full w-full" />
   const navItems: NavEntry[] = [
-    { icon: icon(MapPin), label: 'Home', href: '/' },
-    { icon: icon(Heart), label: 'Saved', href: '/saved' },
+    { icon: icon(MapPin), label: t('nav.home'), href: '/' },
+    { icon: icon(Heart), label: t('nav.saved'), href: '/saved' },
   ].map(item => ({ ...item, isActive: pathname === item.href }))
 
   // Desktop: collapsing slides the sidebar off to the left, freeing the full
@@ -82,8 +84,8 @@ export default function AppSidebar({ mobileOpen = false, onNavigate = () => {}, 
         {!isMobile && (
           <button
             onClick={onToggleCollapse}
-            aria-label="Minimise sidebar"
-            title="Minimise sidebar"
+            aria-label={t('nav.collapse')}
+            title={t('nav.collapse')}
             tabIndex={sidebarHidden ? -1 : 0}
             style={{
               position: 'absolute',
@@ -112,7 +114,7 @@ export default function AppSidebar({ mobileOpen = false, onNavigate = () => {}, 
           initial="hidden"
           animate="visible"
           variants={sidebarVariants}
-          aria-label="Local Finder navigation"
+          aria-label={t('nav.navAria')}
         >
           {/* App wordmark (static — replaces the profile block slot) */}
           <motion.div variants={itemVariants} className="flex items-center space-x-3 p-2">
@@ -132,7 +134,7 @@ export default function AppSidebar({ mobileOpen = false, onNavigate = () => {}, 
                 Local Finder
               </span>
               <span className="text-sm truncate" style={{ color: 'var(--text-muted)' }}>
-                Find it nearby, right now
+                {t('nav.tagline')}
               </span>
             </div>
           </motion.div>
@@ -166,7 +168,7 @@ export default function AppSidebar({ mobileOpen = false, onNavigate = () => {}, 
           {/* Footer note */}
           <motion.div variants={itemVariants} className="mt-4 pt-4 border-t" style={{ borderColor: 'var(--border)' }}>
             <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', lineHeight: 1.5, padding: '0 8px' }}>
-              Powered by live Google Maps data via SerpApi.
+              {t('nav.poweredBy')}
             </div>
           </motion.div>
         </motion.aside>

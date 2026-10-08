@@ -7,6 +7,7 @@ import Badge from './ui/badge'
 import GlassCard from './shared/GlassCard'
 import RouteBadge from './RouteBadge'
 import { useRouteTime } from '../hooks/useRouteTime'
+import { useLanguage } from '../hooks/useLanguage'
 
 /** Place with the Phase 2 server field minutesToClose (defensive: may be absent). */
 type PlaceWithClose = Place & { minutesToClose?: number }
@@ -25,6 +26,7 @@ export function whatsappShareUrl(place: Place): string {
 }
 
 export function StatusBadge({ place }: { place: Place }) {
+  const { t } = useLanguage()
   const minutesToClose = (place as PlaceWithClose).minutesToClose
   if (
     place.isOpen === true &&
@@ -34,28 +36,29 @@ export function StatusBadge({ place }: { place: Place }) {
   ) {
     return (
       <Badge color="#B45309" background="rgba(217,119,6,0.14)" border="rgba(217,119,6,0.30)">
-        Closes in {Math.round(minutesToClose)} min
+        {t('badges.closesIn', { n: Math.round(minutesToClose) })}
       </Badge>
     )
   }
   if (place.closesSoon) {
-    return <Badge color="#D97706" background="rgba(217,119,6,0.12)" border="rgba(217,119,6,0.25)">Closing soon</Badge>
+    return <Badge color="#D97706" background="rgba(217,119,6,0.12)" border="rgba(217,119,6,0.25)">{t('badges.closesSoon')}</Badge>
   }
   if (place.isOpen === true) {
-    return <Badge color="#16A34A" background="rgba(22,163,74,0.12)" border="rgba(22,163,74,0.25)">Open</Badge>
+    return <Badge color="#16A34A" background="rgba(22,163,74,0.12)" border="rgba(22,163,74,0.25)">{t('badges.open')}</Badge>
   }
   if (place.isOpen === false) {
-    return <Badge color="#DC2626" background="rgba(220,38,38,0.10)" border="rgba(220,38,38,0.25)">Closed</Badge>
+    return <Badge color="#DC2626" background="rgba(220,38,38,0.10)" border="rgba(220,38,38,0.25)">{t('badges.closed')}</Badge>
   }
-  return <Badge color="var(--text-muted)" background="var(--track)" border="var(--border)">Hours unknown</Badge>
+  return <Badge color="var(--text-muted)" background="var(--track)" border="var(--border)">{t('badges.unknown')}</Badge>
 }
 
 export function Stars({ rating }: { rating?: number }) {
+  const { t } = useLanguage()
   if (rating === undefined || rating === null) {
-    return <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>No rating</span>
+    return <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{t('badges.noRating')}</span>
   }
   return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '2px' }} aria-label={`Rated ${rating} out of 5`}>
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '2px' }} aria-label={t('badges.rated', { rating })}>
       {[1, 2, 3, 4, 5].map(i => (
         <Star
           key={i}
@@ -95,6 +98,7 @@ export default function PlaceCard({
   userCoords, selectable, compareSelected, compareDisabled, onToggleCompare,
   emergency, hiddenGem,
 }: PlaceCardProps) {
+  const { t } = useLanguage()
   const [imgFailed, setImgFailed] = useState(false)
   const places = useMemo(() => [place], [place])
   const routes = useRouteTime(userCoords, places, 'walk')
@@ -147,8 +151,8 @@ export default function PlaceCard({
               <a
                 href={`tel:${place.phone}`}
                 onClick={e => e.stopPropagation()}
-                aria-label={`Call ${place.name} now`}
-                title={`Call ${place.name}`}
+                aria-label={t('card.callNow', { name: place.name })}
+                title={t('sheet.callAria', { name: place.name })}
                 style={{
                   background: 'rgba(22,163,74,0.16)',
                   border: '1px solid rgba(22,163,74,0.4)',
@@ -165,8 +169,8 @@ export default function PlaceCard({
               target="_blank"
               rel="noopener noreferrer"
               onClick={e => e.stopPropagation()}
-              aria-label={`Share ${place.name} on WhatsApp`}
-              title="Share on WhatsApp"
+              aria-label={t('card.shareWhatsApp', { name: place.name })}
+              title={t('card.shareWhatsAppTitle')}
               style={{
                 background: 'transparent', border: 'none', cursor: 'pointer', padding: 4,
                 color: 'var(--text-muted)', flexShrink: 0, borderRadius: '8px',
@@ -180,10 +184,10 @@ export default function PlaceCard({
                 type="button"
                 role="checkbox"
                 aria-checked={!!compareSelected}
-                aria-label={compareSelected ? `Remove ${place.name} from comparison` : `Select ${place.name} for comparison`}
+                aria-label={t(compareSelected ? 'card.compareRemove' : 'card.compareSelect', { name: place.name })}
                 disabled={!compareSelected && compareDisabled}
                 onClick={e => { e.stopPropagation(); onToggleCompare?.(place) }}
-                title={!compareSelected && compareDisabled ? 'Pick up to two places' : undefined}
+                title={!compareSelected && compareDisabled ? t('card.compareMax') : undefined}
                 style={{
                   background: compareSelected ? 'var(--accent)' : 'var(--track)',
                   border: `1px solid ${compareSelected ? 'var(--accent)' : 'var(--border)'}`,
@@ -200,7 +204,7 @@ export default function PlaceCard({
             <button
               type="button"
               onClick={e => { e.stopPropagation(); onToggleFavorite(place) }}
-              aria-label={isFavorite ? `Remove ${place.name} from saved` : `Save ${place.name}`}
+              aria-label={t(isFavorite ? 'card.unsave' : 'card.save', { name: place.name })}
               aria-pressed={isFavorite}
               style={{
                 background: 'transparent', border: 'none', cursor: 'pointer', padding: 4,
@@ -219,7 +223,7 @@ export default function PlaceCard({
             <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)' }}>{place.rating.toFixed(1)}</span>
           )}
           {place.reviews !== undefined && place.reviews !== null && (
-            <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>({place.reviews.toLocaleString()})</span>
+            <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>({t('card.reviews', { count: place.reviews.toLocaleString() })})</span>
           )}
         </div>
 
@@ -227,7 +231,7 @@ export default function PlaceCard({
           <StatusBadge place={place} />
           {hiddenGem && (
             <Badge color="#7B61FF" background="rgba(123,97,255,0.12)" border="rgba(123,97,255,0.28)">
-              <Sparkles size={11} aria-hidden /> Hidden gem
+              <Sparkles size={11} aria-hidden /> {t('card.hiddenGem')}
             </Badge>
           )}
           {place.distanceKm !== undefined && (

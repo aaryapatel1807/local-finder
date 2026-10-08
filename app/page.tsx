@@ -25,6 +25,7 @@ import { useSearch } from '../hooks/useSearch'
 import { useFavorites } from '../hooks/useFavorites'
 import { useHealth } from '../hooks/useHealth'
 import { useLocalStorage } from '../hooks/useLocalStorage'
+import { useLanguage } from '../hooks/useLanguage'
 import type { Place, ParseResponse, ParsedQueryResult } from '../components/types'
 import { mapParseSort, sortPlaces, formatDistance } from '../components/types'
 import { isQuestionLike } from '../lib/question'
@@ -80,8 +81,9 @@ function HomeContent() {
   const searchParams = useSearchParams()
   const { locationLabel, setLocationLabel, radiusKm, setRadiusKm } = useLocation()
   const {
-    coords, status: geoStatus, error: geoError, requestLocation, setCoords, accuracyMeters,
+    coords, status: geoStatus, errorKey: geoErrorKey, requestLocation, setCoords, accuracyMeters,
   } = useGeolocation()
+  const { t } = useLanguage()
   const { favorites, isFavorite, toggle } = useFavorites()
   // The sibling's /api/health does not carry an aiDisabled flag; the AI routes
   // report it per-call instead, so we learn it lazily and hide AI UI after.
@@ -137,13 +139,13 @@ function HomeContent() {
     }
     if (lat && lng && Number.isFinite(Number(lat)) && Number.isFinite(Number(lng))) {
       setCoords({ lat: Number(lat), lng: Number(lng) })
-      setLocationLabel('Shared location')
+      setLocationLabel(t('nav.sharedLocation'))
     } else {
       // Pinned location (set on the map earlier) wins over a fresh geo fix.
       const pin = readPinnedLocation()
       if (pin) {
         setCoords(pin)
-        setLocationLabel('Pinned location')
+        setLocationLabel(t('nav.pinnedLocation'))
       } else {
         requestLocation() // browser location prompt on open (spec flow step 1)
       }
@@ -158,8 +160,8 @@ function HomeContent() {
 
   // ── Geolocation side effects ─────────────────────────────────────────────
   useEffect(() => {
-    if (geoStatus === 'granted' && locationLabel !== 'Near you' && !searchParams.get('lat')) {
-      setLocationLabel('Near you')
+    if (geoStatus === 'granted' && locationLabel !== t('nav.nearYou') && !searchParams.get('lat')) {
+      setLocationLabel(t('nav.nearYou'))
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [geoStatus])
@@ -211,7 +213,7 @@ function HomeContent() {
       const a = body?.answer
       if (res.ok && a?.place) {
         setAnswer({
-          placeName: typeof a.place === 'string' ? a.place : (a.place?.name ?? 'Top pick'),
+          placeName: typeof a.place === 'string' ? a.place : (a.place?.name ?? t('page.topPick')),
           reasons: Array.isArray(a.reasons) ? a.reasons : [],
           summary: typeof a.summary === 'string' ? a.summary : null,
         })
@@ -303,12 +305,12 @@ function HomeContent() {
     setCompareIds(prev => {
       if (prev.includes(place.id)) return prev.filter(id => id !== place.id)
       if (prev.length >= 3) {
-        showToast('Pick up to three places to compare')
+        showToast(t('toast.compareMax'))
         return prev
       }
       return [...prev, place.id]
     })
-  }, [showToast])
+  }, [showToast, t])
 
   const comparePlaces = useMemo(() => {
     if (compareIds.length < 2) return null
@@ -331,24 +333,24 @@ function HomeContent() {
         if (g && Number.isFinite(g.lat) && Number.isFinite(g.lng)) {
           setCoords({ lat: g.lat, lng: g.lng })
           const label = typeof g.label === 'string' && g.label ? g.label : q
-          setLocationLabel(`near ${label}`)
+          setLocationLabel(t('page.nearAnchor', { label }))
           setAnchor({ label })
-          showToast(`Searching near ${label}`)
+          showToast(t('page.searchingAround', { label }))
           return
         }
       }
       // 404 NO_RESULTS or bad payload → keep current location
-      showToast(`Couldn't find "${q}" — using your current location`)
+      showToast(t('toast.geocodeFail', { q }))
     } catch {
-      showToast(`Couldn't find "${q}" — using your current location`)
+      showToast(t('toast.geocodeFail', { q }))
     }
-  }, [setCoords, setLocationLabel, showToast])
+  }, [setCoords, setLocationLabel, showToast, t])
 
   const clearAnchor = useCallback(() => {
     setAnchor(null)
-    setLocationLabel('Near you')
+    setLocationLabel(t('nav.nearYou'))
     requestLocation()
-  }, [requestLocation, setLocationLabel])
+  }, [requestLocation, setLocationLabel, t])
 
   const useMyLocation = useCallback(() => {
     setAnchor(null)
@@ -369,15 +371,15 @@ function HomeContent() {
           setLocationLabel(typeof g.label === 'string' && g.label ? g.label : q)
           setAnchor(null)
           setCityInput('')
-          showToast(`Showing results for ${typeof g.label === 'string' && g.label ? g.label : q}`)
+          showToast(t('toast.showingResultsFor', { label: typeof g.label === 'string' && g.label ? g.label : q }))
           return
         }
       }
-      showToast(`Couldn't find "${q}" — try another city`)
+      showToast(t('toast.cityNotFound', { q }))
     } catch {
-      showToast('Could not look up that city')
+      showToast(t('toast.cityLookupFail'))
     }
-  }, [cityInput, setCoords, setLocationLabel, showToast])
+  }, [cityInput, setCoords, setLocationLabel, showToast, t])
 
   const pickCity = useCallback((city: CityOption) => {
     setCoords({ lat: city.lat, lng: city.lng })
@@ -388,11 +390,11 @@ function HomeContent() {
   // ── Pinned location (set on the map) ─────────────────────────────────────
   const handlePinConfirm = useCallback((c: Coords) => {
     setCoords(c)
-    setLocationLabel('Pinned location')
+    setLocationLabel(t('nav.pinnedLocation'))
     setAnchor(null)
     setPickerOpen(false)
-    showToast('Pinned location set')
-  }, [setCoords, setLocationLabel, showToast])
+    showToast(t('toast.pinnedSet'))
+  }, [setCoords, setLocationLabel, showToast, t])
 
   // ── Emergency mode ───────────────────────────────────────────────────────
   const emergencySearch = useCallback((q: string, toastMsg: string) => {
@@ -442,13 +444,13 @@ function HomeContent() {
     })
     if (place) params.set('place', place.id)
     const url = `${window.location.origin}/?${params.toString()}`
-    const done = () => showToast('Link copied')
+    const done = () => showToast(t('toast.linkCopied'))
     if (navigator.clipboard?.writeText) {
-      navigator.clipboard.writeText(url).then(done, () => showToast('Could not copy the link'))
+      navigator.clipboard.writeText(url).then(done, () => showToast(t('toast.copyFailed')))
     } else {
-      showToast('Could not copy the link')
+      showToast(t('toast.copyFailed'))
     }
-  }, [coords, submittedQuery, radiusKm, showToast])
+  }, [coords, submittedQuery, radiusKm, showToast, t])
 
   // ── AI query parsing (with disambiguation + near-anchor) ──────────────────
   const applyParsedSearch = useCallback((parsed: ParsedQueryResult, query: string) => {
@@ -487,17 +489,17 @@ function HomeContent() {
         }
       } else {
         setAmbiguity(null)
-        showToast('Could not understand that — searching as typed')
+        showToast(t('toast.aiFallback'))
         runSearch(body?.fallbackQuery || text)
       }
     } catch {
       setAmbiguity(null)
-      showToast('Could not understand that — searching as typed')
+      showToast(t('toast.aiFallback'))
       runSearch(text)
     } finally {
       setParsing(false)
     }
-  }, [applyParsedSearch, runSearch, showToast])
+  }, [applyParsedSearch, runSearch, showToast, t])
 
   const selectAmbiguity = (query: string) => {
     if (ambiguity) {
@@ -582,7 +584,7 @@ function HomeContent() {
             <MapPin size={14} aria-hidden />
             <span>{locationLabel}</span>
             {geoStatus === 'granted' && accuracyMeters !== null && (
-              <span className="chip chip-muted" title="GPS fix accuracy">±{Math.round(accuracyMeters)} m</span>
+              <span className="chip chip-muted" title={t('page.gpsAccuracy')}>±{Math.round(accuracyMeters)} m</span>
             )}
             <button
               type="button"
@@ -593,7 +595,7 @@ function HomeContent() {
                 fontFamily: "'Satoshi', sans-serif", textDecoration: 'underline',
               }}
             >
-              Set on map
+              {t('page.setOnMap')}
             </button>
             <button
               type="button"
@@ -604,7 +606,7 @@ function HomeContent() {
                 fontFamily: "'Satoshi', sans-serif", textDecoration: 'underline',
               }}
             >
-              Use my location
+              {t('page.useMyLocation')}
             </button>
           </div>
         )}
@@ -622,19 +624,19 @@ function HomeContent() {
         {geoStatus === 'denied' && (
           <GlassCard padding="p-4" className="flex flex-col gap-3">
             <div style={{ fontSize: '0.85rem', color: 'var(--text-faint)' }}>
-              {geoError || 'Location unavailable.'} Set your area:
+              {geoErrorKey ? t(geoErrorKey) : t('page.locationUnavailable')} {t('page.geoAreaPrompt')}
             </div>
             <form
               onSubmit={submitCity}
               style={{ display: 'flex', gap: '8px', alignItems: 'center' }}
-              aria-label="Set your city"
+              aria-label={t('page.chooseCity')}
             >
               <input
                 type="text"
                 value={cityInput}
                 onChange={e => setCityInput(e.target.value)}
-                placeholder="Type a city…"
-                aria-label="Type a city"
+                placeholder={t('page.cityPlaceholder')}
+                aria-label={t('page.cityPlaceholder')}
                 enterKeyHint="search"
                 style={{
                   flex: 1, minWidth: 0,
@@ -644,10 +646,10 @@ function HomeContent() {
                 }}
               />
               <Button type="submit" variant="primary" disabled={!cityInput.trim()} style={{ padding: '10px 18px' }}>
-                Set
+                {t('page.setCity')}
               </Button>
             </form>
-            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }} aria-label="Quick city picks">
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }} aria-label={t('page.quickCityPicks')}>
               {CITY_FALLBACKS.map(c => (
                 <button
                   key={c.name}
@@ -662,17 +664,17 @@ function HomeContent() {
             </div>
             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
               <Button variant="ghost" onClick={() => setPickerOpen(true)}>
-                <MapPin size={16} /> Set on map
+                <MapPin size={16} /> {t('page.setOnMap')}
               </Button>
               <Button variant="ghost" onClick={useMyLocation}>
-                <LocateFixed size={16} /> Retry location
+                <LocateFixed size={16} /> {t('page.retryLocation')}
               </Button>
             </div>
           </GlassCard>
         )}
         {geoStatus === 'loading' && (
           <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }} aria-live="polite">
-            Getting your location…
+            {t('page.locating')}
           </div>
         )}
 
@@ -681,15 +683,15 @@ function HomeContent() {
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
               <div aria-live="polite" style={{ fontSize: '0.9rem', fontWeight: 600 }}>
-                {search.isLoading ? 'Searching…' : search.data ? `${results.length} place${results.length === 1 ? '' : 's'} found` : ''}
+                {search.isLoading ? t('page.searching') : search.data ? (results.length === 1 ? t('page.resultsOne') : t('page.resultsMany', { count: results.length })) : ''}
               </div>
               {anchor && (
-                <span className="chip chip-green" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }} title="Searching near this location">
-                  <MapPin size={12} aria-hidden /> near {anchor.label}
+                <span className="chip chip-green" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }} title={t('page.anchorTitle')}>
+                  <MapPin size={12} aria-hidden /> {t('page.nearAnchor', { label: anchor.label })}
                   <button
                     type="button"
                     onClick={clearAnchor}
-                    aria-label="Clear location anchor"
+                    aria-label={t('page.clearAnchor')}
                     style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', padding: 0, display: 'flex', alignItems: 'center' }}
                   >
                     <X size={13} />
@@ -697,12 +699,12 @@ function HomeContent() {
                 </span>
               )}
               {search.data?.mock && (
-                <span className="chip chip-purple" title="Served from demo data instead of live SerpApi data">
-                  Demo data
+                <span className="chip chip-purple" title={t('page.demoDataTitle')}>
+                  {t('page.demoData')}
                 </span>
               )}
               {search.data?.cached && (
-                <span className="chip chip-muted" title="Served from the server cache">Cached</span>
+                <span className="chip chip-muted" title={t('page.cachedTitle')}>{t('page.cached')}</span>
               )}
             </div>
             <div style={{ display: 'inline-flex', gap: '6px', flexWrap: 'wrap' }}>
@@ -710,10 +712,10 @@ function HomeContent() {
                 variant="ghost"
                 onClick={surpriseMe}
                 disabled={openCount === 0}
-                title={openCount === 0 ? 'No open places right now' : 'Open a random open place'}
+                title={t(openCount === 0 ? 'page.noOpenPlaces' : 'page.randomOpenPlace')}
                 style={{ padding: '8px 14px' }}
               >
-                🎲 Surprise me
+                {t('page.surpriseMe')}
               </Button>
               <Button
                 variant={compareMode ? 'primary' : 'ghost'}
@@ -721,16 +723,16 @@ function HomeContent() {
                 aria-pressed={compareMode}
                 style={{ padding: '8px 14px' }}
               >
-                Compare{compareIds.length > 0 ? ` (${compareIds.length})` : ''}
+                {compareIds.length > 0 ? t('page.compareWithCount', { count: compareIds.length }) : t('page.compare')}
               </Button>
-              <div role="group" aria-label="View mode" style={{ display: 'inline-flex', gap: '6px' }}>
+              <div role="group" aria-label={t('page.viewMode')} style={{ display: 'inline-flex', gap: '6px' }}>
                 <Button
                   variant={viewMode === 'list' ? 'primary' : 'ghost'}
                   onClick={() => setViewMode('list')}
                   aria-pressed={viewMode === 'list'}
                   style={{ padding: '8px 14px' }}
                 >
-                  <List size={15} /> List
+                  <List size={15} /> {t('page.list')}
                 </Button>
                 <Button
                   variant={viewMode === 'map' ? 'primary' : 'ghost'}
@@ -738,7 +740,7 @@ function HomeContent() {
                   aria-pressed={viewMode === 'map'}
                   style={{ padding: '8px 14px' }}
                 >
-                  <MapIcon size={15} /> Map
+                  <MapIcon size={15} /> {t('page.map')}
                 </Button>
               </div>
             </div>
@@ -759,7 +761,7 @@ function HomeContent() {
 
         {/* Results body */}
         {search.isLoading && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }} aria-label="Loading results">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }} aria-label={t('page.loadingResults')}>
             {[0, 1, 2, 3].map(i => <SkeletonCard key={i} />)}
           </div>
         )}
@@ -818,23 +820,22 @@ function HomeContent() {
         {/* Idle welcome */}
         {!hasSearched && !search.isLoading && (
           <GlassCard className="text-center" style={{ padding: '32px 24px' }}>
-            <h2 style={{ fontSize: '1.3rem', marginBottom: '8px' }}>What do you need nearby?</h2>
+            <h2 style={{ fontSize: '1.3rem', marginBottom: '8px' }}>{t('page.welcomeTitle')}</h2>
             <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', maxWidth: 420, margin: '0 auto 16px' }}>
-              Type what you're looking for — or tap a category above. Results show ratings,
-              hours, distance and directions from live Google Maps data.
+              {t('page.welcomeBody')}
             </p>
             <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', flexWrap: 'wrap' }}>
               <Button
                 variant="primary"
-                onClick={() => emergencySearch('pharmacy', 'Showing open pharmacies & clinics nearest you')}
+                onClick={() => emergencySearch('pharmacy', t('page.emergencyPharmacyToast'))}
               >
-                🚨 Open pharmacies near me
+                {t('page.emergencyPharmacy')}
               </Button>
               <Button
                 variant="ghost"
-                onClick={() => emergencySearch('petrol pump', 'Showing open petrol pumps nearest you')}
+                onClick={() => emergencySearch('petrol pump', t('page.emergencyPetrolToast'))}
               >
-                ⛽ Petrol pumps open now
+                {t('page.emergencyPetrol')}
               </Button>
             </div>
           </GlassCard>
@@ -843,14 +844,14 @@ function HomeContent() {
         {/* Recently viewed */}
         {!hasSearched && !search.isLoading && recentlyViewed.length > 0 && (
           <div>
-            <h3 style={{ fontSize: '0.9rem', fontWeight: 700, marginBottom: '8px' }}>Recently viewed</h3>
+            <h3 style={{ fontSize: '0.9rem', fontWeight: 700, marginBottom: '8px' }}>{t('page.recentlyViewed')}</h3>
             <div style={{ display: 'flex', gap: '10px', overflowX: 'auto', paddingBottom: '4px' }}>
               {recentlyViewed.map(p => (
                 <button
                   key={p.id}
                   type="button"
                   onClick={() => setSelectedPlace(p)}
-                  aria-label={`View ${p.name}`}
+                  aria-label={t('page.viewPlace', { name: p.name })}
                   style={{
                     flexShrink: 0, width: 150, textAlign: 'left', cursor: 'pointer',
                     background: 'var(--glass-bg)',
@@ -886,7 +887,7 @@ function HomeContent() {
                     {p.name}
                   </div>
                   <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '2px' }}>
-                    {p.rating !== undefined && p.rating !== null ? `★ ${p.rating.toFixed(1)}` : 'No rating'}
+                    {p.rating !== undefined && p.rating !== null ? `★ ${p.rating.toFixed(1)}` : t('badges.noRating')}
                     {p.distanceKm !== undefined && ` · ${formatDistance(p.distanceKm)}`}
                   </div>
                 </button>
@@ -899,7 +900,7 @@ function HomeContent() {
         {hasSearched && coords && (
           <div style={{ display: 'flex', justifyContent: 'center' }}>
             <Button variant="ghost" onClick={() => shareSearch()} style={{ fontSize: '0.82rem' }}>
-              Share this search
+              {t('page.shareSearch')}
             </Button>
           </div>
         )}
@@ -907,7 +908,7 @@ function HomeContent() {
         {/* Quota meter */}
         {health?.callsThisMonth !== undefined && (
           <div style={{ textAlign: 'center', fontSize: '0.72rem', color: 'var(--text-faint)' }} aria-live="polite">
-            {health.callsThisMonth} searches used this month
+            {t('page.quotaMeter', { count: health.callsThisMonth })}
           </div>
         )}
       </div>
@@ -931,7 +932,7 @@ function HomeContent() {
         <button
           type="button"
           onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
-          aria-label="Back to top"
+          aria-label={t('page.backToTop')}
           style={{
             position: 'fixed', bottom: '24px', right: '24px', zIndex: 90,
             width: 48, height: 48, borderRadius: '50%',
