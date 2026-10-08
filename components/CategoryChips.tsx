@@ -1,22 +1,24 @@
 'use client'
+import { useLanguage } from '../hooks/useLanguage'
 
-export const CATEGORIES = [
-  { label: 'Pharmacy', query: 'pharmacy' },
-  { label: 'Chai', query: 'chai' },
-  { label: 'ATM', query: 'ATM' },
-  { label: 'Petrol pump', query: 'petrol pump' },
-  { label: 'Clinic', query: 'clinic' },
-  { label: 'Stationery', query: 'stationery shop' },
-  { label: 'Mechanic', query: 'car mechanic' },
-  { label: 'Groceries', query: 'grocery store' },
+export const CATEGORIES: { key: string; query: string }[] = [
+  { key: 'chips.pharmacy', query: 'pharmacy' },
+  { key: 'chips.chai', query: 'chai' },
+  { key: 'chips.atm', query: 'ATM' },
+  { key: 'chips.petrol', query: 'petrol pump' },
+  { key: 'chips.clinic', query: 'clinic' },
+  { key: 'chips.stationery', query: 'stationery shop' },
+  { key: 'chips.mechanic', query: 'car mechanic' },
+  { key: 'chips.groceries', query: 'grocery store' },
 ]
 
 /** Horizontally scrollable one-tap category row — tapping sets the query and searches. */
 export default function CategoryChips({ onSelect, activeQuery }: { onSelect: (query: string) => void; activeQuery?: string }) {
+  const { t } = useLanguage()
   return (
     <div
       role="list"
-      aria-label="Quick categories"
+      aria-label={t('chips.aria')}
       style={{
         display: 'flex',
         gap: '8px',
@@ -26,10 +28,11 @@ export default function CategoryChips({ onSelect, activeQuery }: { onSelect: (qu
       }}
     >
       {CATEGORIES.map(cat => {
+        const label = t(cat.key)
         const active = activeQuery?.toLowerCase() === cat.query.toLowerCase()
         return (
           <button
-            key={cat.label}
+            key={cat.key}
             role="listitem"
             type="button"
             onClick={() => onSelect(cat.query)}
@@ -43,7 +46,7 @@ export default function CategoryChips({ onSelect, activeQuery }: { onSelect: (qu
               fontSize: '0.85rem',
             }}
           >
-            {cat.label}
+            {label}
           </button>
         )
       })}

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import Providers from "../components/Providers";
 import LayoutShell from "../components/shared/LayoutShell";
+import PwaRegister from "../components/PwaRegister";
 
 export const metadata: Metadata = {
   title: "Local Finder — find it nearby, right now",
@@ -17,6 +18,9 @@ export default function RootLayout({
   return (
     <html lang="en">
       <head>
+        <link rel="manifest" href="/manifest.json" />
+        <meta name="theme-color" content="#0F766E" />
+        <link rel="apple-touch-icon" href="/icon-192.png" />
         <link
           rel="stylesheet"
           href="https://api.fontshare.com/v2/css?f[]=clash-display@700,600&f[]=satoshi@400,500,700&display=swap"
@@ -41,6 +45,7 @@ export default function RootLayout({
             <div className="frost-vignette" />
           </div>
           <Providers>
+            <PwaRegister />
             <LayoutShell>{children}</LayoutShell>
           </Providers>
         </div>
