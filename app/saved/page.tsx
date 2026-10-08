@@ -1,12 +1,13 @@
 'use client'
-import { useState } from 'react'
-import { Heart } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { Heart, Search } from 'lucide-react'
 import ScenicBackdrop from '../../components/shared/ScenicBackdrop'
 import GlassCard from '../../components/shared/GlassCard'
 import PlaceCard from '../../components/PlaceCard'
 import PlaceSheet from '../../components/PlaceSheet'
 import Toast from '../../components/Toast'
 import { useFavorites } from '../../hooks/useFavorites'
+import { semanticScore } from '../../lib/semantic'
 import type { Place } from '../../components/types'
 
 export default function SavedPage() {
@@ -14,6 +15,17 @@ export default function SavedPage() {
   const [aiDisabled, setAiDisabled] = useState(false)
   const [selectedPlace, setSelectedPlace] = useState<Place | null>(null)
   const [toast, setToast] = useState<string | null>(null)
+  const [searchQuery, setSearchQuery] = useState('')
+
+  const visibleFavorites = useMemo(() => {
+    const q = searchQuery.trim()
+    if (!q) return favorites
+    return favorites
+      .map(place => ({ place, score: semanticScore(q, place) }))
+      .filter(entry => entry.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .map(entry => entry.place)
+  }, [favorites, searchQuery])
 
   const sharePlace = (place: Place) => {
     const params = new URLSearchParams({
@@ -67,7 +79,35 @@ export default function SavedPage() {
           </GlassCard>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            {favorites.map(place => (
+            <div style={{ position: 'relative' }}>
+              <Search
+                size={16}
+                style={{
+                  position: 'absolute', left: 12, top: '50%',
+                  transform: 'translateY(-50%)', color: 'var(--text-muted)',
+                  pointerEvents: 'none',
+                }}
+              />
+              <input
+                type="search"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                placeholder="Search saved places — e.g. 'quiet cafe'"
+                aria-label="Search saved places"
+                style={{
+                  width: '100%', padding: '10px 12px 10px 36px',
+                  borderRadius: '12px', border: '1px solid var(--border)',
+                  background: 'var(--glass-bg)', color: 'var(--text)',
+                  fontSize: '0.9rem',
+                }}
+              />
+            </div>
+            {visibleFavorites.length === 0 && searchQuery.trim() !== '' && (
+              <p style={{ fontSize: '0.88rem', color: 'var(--text-muted)' }}>
+                No saved places match “{searchQuery.trim()}”.
+              </p>
+            )}
+            {visibleFavorites.map(place => (
               <div key={place.id} id={`place-card-${place.id}`}>
                 <PlaceCard
                   place={place}
