@@ -2,6 +2,7 @@
 import { FormEvent, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { ArrowUp, List, LocateFixed, Map as MapIcon, MapPin, X } from 'lucide-react'
+import { motion, AnimatePresence, MotionConfig } from 'framer-motion'
 import ScenicBackdrop from '../components/shared/ScenicBackdrop'
 import GlassCard from '../components/shared/GlassCard'
 import { useLocation } from '../components/shared/LocationContext'
@@ -22,6 +23,12 @@ import ErrandPlanner from '../components/ErrandPlanner'
 import MeetInMiddle from '../components/MeetInMiddle'
 import LocationPicker, { PINNED_STORAGE_KEY } from '../components/LocationPicker'
 import Button from '../components/ui/button'
+import IntroModal from '../components/IntroModal'
+import ResultNarrative from '../components/ResultNarrative'
+import SuggestionChips from '../components/SuggestionChips'
+import EmergencyButton from '../components/EmergencyButton'
+import { GlobeHero } from '../components/GlobeHeroLazy'
+import { hasSeenIntro, markIntroSeen } from '../lib/introSeen'
 import { useGeolocation, CITY_FALLBACKS, type CityOption, type Coords } from '../hooks/useGeolocation'
 import { useSearch } from '../hooks/useSearch'
 import { useFavorites } from '../hooks/useFavorites'
@@ -110,6 +117,11 @@ function HomeContent() {
   const [recentlyViewed, setRecentlyViewed] = useLocalStorage<Place[]>('localfinder_recently_viewed', [])
   const [urlInitDone, setUrlInitDone] = useState(false)
   const [emergency, setEmergency] = useState(false)
+  // Combined emergency search (pharmacy + hospital + petrol pump) results.
+  const [emergencyResults, setEmergencyResults] = useState<Place[] | null>(null)
+  const [emergencyLoading, setEmergencyLoading] = useState(false)
+  // First-run intro modal (once per device).
+  const [showIntro, setShowIntro] = useState(false)
   const health = useHealth()
 
   // ── Phase 2: ambiguity, anchor, answer, compare, picker ──────────────────
@@ -130,6 +142,16 @@ function HomeContent() {
   const showToast = useCallback((msg: string) => {
     setToast(msg)
     setTimeout(() => setToast(null), 2400)
+  }, [])
+
+  // ── First-run intro ──────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!hasSeenIntro()) setShowIntro(true)
+  }, [])
+
+  const closeIntro = useCallback(() => {
+    markIntroSeen()
+    setShowIntro(false)
   }, [])
 
   // ── URL prefill (?q=&lat=&lng=&r=) — share links ──────────────────────────
@@ -192,10 +214,14 @@ function HomeContent() {
     radiusKm,
   })
 
+  // Combined loading gate: query search + combined emergency search.
+  const isLoading = search.isLoading || emergencyLoading
+
   const runSearch = useCallback((q: string) => {
     const query = q.trim()
     if (!query) return
     setEmergency(false)
+    setEmergencyResults(null)
     setSubmittedQuery(query)
     setInput(query)
     setViewMode('list')
@@ -286,7 +312,9 @@ function HomeContent() {
 
   // ── Results: open-now + price filters + client-side sort (no new API call) ─
   const results = useMemo(() => {
-    let places = search.data?.places ?? []
+    // Combined emergency results (pharmacy + hospital + petrol pump) take
+    // precedence over the query search when present.
+    let places = emergencyResults ?? search.data?.places ?? []
     if (openNow) places = places.filter(p => p.isOpen === true)
     if (priceBand !== 'any') places = places.filter(p => matchesPriceBand(p.price, priceBand))
     if (sort === 'foryou') {
@@ -307,7 +335,7 @@ function HomeContent() {
       return scored.slice(0, 20).map(x => x.p)
     }
     return sortPlaces(places, sort)
-  }, [search.data, openNow, sort, priceBand, sentimentTick, radiusKm, rerankForYou])
+  }, [search.data, openNow, sort, priceBand, sentimentTick, radiusKm, rerankForYou, emergencyResults])
 
   // Sentiment from loaded review summaries feeds the best-sort blend.
   const handleReviewsLoaded = useCallback((placeId: string, sentiment?: number) => {
@@ -496,14 +524,54 @@ function HomeContent() {
     showToast(t('toast.pinnedSet'))
   }, [setCoords, setLocationLabel, showToast, t])
 
-  // ── Emergency mode ───────────────────────────────────────────────────────
-  const emergencySearch = useCallback((q: string, toastMsg: string) => {
+  // ── Combined emergency search: 24h pharmacies + hospitals + petrol pumps ───
+  // Explicit user tap (EmergencyButton). Up to 3 cached /api/search calls,
+  // merged + deduped into one open-now, nearest-first list.
+  const runEmergencySearch = useCallback(async () => {
+    if (!coords) {
+      showToast(t('errand.needLocation'))
+      return
+    }
+    setEmergency(true)
     setOpenNow(true)
     setSort('nearest')
-    runSearch(q)
-    setEmergency(true)
-    showToast(toastMsg)
-  }, [runSearch, showToast])
+    setEmergencyLoading(true)
+    setEmergencyResults(null)
+    setViewMode('list')
+    try {
+      const bodies = await Promise.all(
+        ['24 hour pharmacy', 'hospital', 'petrol pump'].map(async (query) => {
+          const res = await fetch('/api/search', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query, lat: coords.lat, lng: coords.lng, radiusKm }),
+          })
+          const body = await res.json().catch(() => null)
+          return (res.ok && Array.isArray(body?.places) ? body.places : []) as Place[]
+        })
+      )
+      const merged: Place[] = []
+      const seen = new Set<string>()
+      for (const list of bodies) {
+        for (const p of list) {
+          if (!seen.has(p.id)) {
+            seen.add(p.id)
+            merged.push(p)
+          }
+        }
+      }
+      const open = merged
+        .filter(p => p.isOpen === true)
+        .sort((a, b) => (a.distanceKm ?? Infinity) - (b.distanceKm ?? Infinity))
+        .slice(0, 20)
+      setEmergencyResults(open)
+      if (open.length === 0) showToast(t('page.noOpenPlaces'))
+    } catch {
+      showToast(t('page.noOpenPlaces'))
+    } finally {
+      setEmergencyLoading(false)
+    }
+  }, [coords, radiusKm, showToast, t])
 
   // ── Recently viewed ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -631,11 +699,12 @@ function HomeContent() {
 
   const errorCode = (search.error as { code?: string } | null)?.code
   const isQuota = errorCode === 'QUOTA_EXCEEDED'
-  const hasSearched = submittedQuery.trim().length > 0
+  const hasSearched = submittedQuery.trim().length > 0 || emergencyResults !== null
 
   return (
-    <div style={{ position: 'relative', zIndex: 1 }}>
-      <ScenicBackdrop />
+    <MotionConfig reducedMotion="user">
+      <div style={{ position: 'relative', zIndex: 1 }}>
+        <ScenicBackdrop />
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
         {/* Search */}
@@ -676,8 +745,12 @@ function HomeContent() {
         />
 
         {/* Errand planner + meet in the middle */}
-        <ErrandPlanner coords={coords} />
-        <MeetInMiddle myCoords={coords} onMeet={handleMeet} />
+        <div id="errands" style={{ scrollMarginTop: '90px' }}>
+          <ErrandPlanner coords={coords} />
+        </div>
+        <div id="meet" style={{ scrollMarginTop: '90px' }}>
+          <MeetInMiddle myCoords={coords} onMeet={handleMeet} />
+        </div>
 
         {/* Location status (accuracy badge + set on map) */}
         {geoStatus !== 'denied' && (
@@ -787,7 +860,7 @@ function HomeContent() {
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
               <div aria-live="polite" style={{ fontSize: '0.9rem', fontWeight: 600 }}>
-                {search.isLoading ? t('page.searching') : search.data ? (results.length === 1 ? t('page.resultsOne') : t('page.resultsMany', { count: results.length })) : ''}
+                {isLoading ? t('page.searching') : (search.data || emergencyResults) ? (results.length === 1 ? t('page.resultsOne') : t('page.resultsMany', { count: results.length })) : ''}
               </div>
               {anchor && (
                 <span className="chip chip-green" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }} title={t('page.anchorTitle')}>
@@ -864,13 +937,13 @@ function HomeContent() {
         )}
 
         {/* Results body */}
-        {search.isLoading && (
+        {isLoading && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }} aria-label={t('page.loadingResults')}>
             {[0, 1, 2, 3].map(i => <SkeletonCard key={i} />)}
           </div>
         )}
 
-        {!search.isLoading && search.isError && (
+        {!isLoading && search.isError && (
           <ErrorState
             code={errorCode}
             message={search.error?.message}
@@ -889,12 +962,12 @@ function HomeContent() {
           />
         )}
 
-        {!search.isLoading && !search.isError && hasSearched && results.length === 0 && (
+        {!isLoading && !search.isError && hasSearched && results.length === 0 && (
           <EmptyState onWidenRadius={radiusKm < 10 ? widenRadius : undefined} />
         )}
 
         {/* Compare table */}
-        {!search.isLoading && !search.isError && hasSearched && viewMode === 'list' && compareMode && comparePlaces && (
+        {!isLoading && !search.isError && hasSearched && viewMode === 'list' && compareMode && comparePlaces && (
           <CompareTable
             places={comparePlaces}
             userCoords={coords}
@@ -903,10 +976,33 @@ function HomeContent() {
           />
         )}
 
-        {!search.isLoading && !search.isError && hasSearched && results.length > 0 && viewMode === 'list' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+        {/* One-line story above the results */}
+        {hasSearched && !isLoading && !search.isError && results.length > 0 && (
+          <ResultNarrative
+            count={results.length}
+            openCount={openCount}
+            radiusKm={radiusKm}
+            nearestName={results[0]?.name}
+            nearestWalkMin={results[0]?.distanceKm !== undefined ? Math.max(1, Math.round(results[0].distanceKm / 5 * 60)) : undefined}
+          />
+        )}
+
+        {!isLoading && !search.isError && hasSearched && results.length > 0 && viewMode === 'list' && (
+          <motion.div
+            variants={{ hidden: {}, show: { transition: { staggerChildren: 0.05 } } }}
+            initial="hidden"
+            animate="show"
+            style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}
+          >
             {results.map(place => (
-              <div key={place.id} id={`place-card-${place.id}`}>
+              <motion.div
+                key={place.id}
+                id={`place-card-${place.id}`}
+                variants={{
+                  hidden: { opacity: 0, y: 12 },
+                  show: { opacity: 1, y: 0, transition: { duration: 0.2, ease: 'easeOut' } },
+                }}
+              >
                 <PlaceCard
                   place={place}
                   isFavorite={isFavorite(place.id)}
@@ -921,12 +1017,12 @@ function HomeContent() {
                   emergency={emergency}
                   hiddenGem={hiddenGemIds.has(place.id)}
                 />
-              </div>
+              </motion.div>
             ))}
-          </div>
+          </motion.div>
         )}
 
-        {!search.isLoading && !search.isError && hasSearched && results.length > 0 && viewMode === 'map' && (
+        {!isLoading && !search.isError && hasSearched && results.length > 0 && viewMode === 'map' && (
           <MapView
             places={results}
             userLat={coords?.lat}
@@ -937,32 +1033,23 @@ function HomeContent() {
         )}
 
         {/* Idle welcome */}
-        {!hasSearched && !search.isLoading && (
+        {!hasSearched && !isLoading && (
           <GlassCard className="text-center" style={{ padding: '32px 24px' }}>
+            <GlobeHero />
             <h2 style={{ fontSize: '1.3rem', marginBottom: '8px' }}>{t('page.welcomeTitle')}</h2>
             <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', maxWidth: 420, margin: '0 auto 16px' }}>
               {t('page.welcomeBody')}
             </p>
-            <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', flexWrap: 'wrap' }}>
-              <Button
-                variant="primary"
-                onClick={() => emergencySearch('pharmacy', t('page.emergencyPharmacyToast'))}
-              >
-                {t('page.emergencyPharmacy')}
-              </Button>
-              <Button
-                variant="ghost"
-                onClick={() => emergencySearch('petrol pump', t('page.emergencyPetrolToast'))}
-              >
-                {t('page.emergencyPetrol')}
-              </Button>
+            <div style={{ marginBottom: '16px' }}>
+              <SuggestionChips onSelect={runSearch} />
             </div>
+            <EmergencyButton onActivate={runEmergencySearch} />
           </GlassCard>
         )}
 
         {/* Recently viewed */}
-        {!hasSearched && !search.isLoading && recentlyViewed.length > 0 && (
-          <div>
+        {!hasSearched && !isLoading && recentlyViewed.length > 0 && (
+          <div id="recent" style={{ scrollMarginTop: '90px' }}>
             <h3 style={{ fontSize: '0.9rem', fontWeight: 700, marginBottom: '8px' }}>{t('page.recentlyViewed')}</h3>
             <div style={{ display: 'flex', gap: '10px', overflowX: 'auto', paddingBottom: '4px' }}>
               {recentlyViewed.map(p => (
@@ -1033,18 +1120,25 @@ function HomeContent() {
       </div>
 
       {/* Details sheet */}
-      <PlaceSheet
-        place={selectedPlace}
-        onClose={() => setSelectedPlace(null)}
-        isFavorite={selectedPlace ? isFavorite(selectedPlace.id) : false}
-        onToggleFavorite={handleToggleFavorite}
-        onShare={shareSearch}
-        aiDisabled={aiDisabled}
-        onAiDisabled={() => setAiDisabled(true)}
-        onReviewsLoaded={handleReviewsLoaded}
-        userCoords={coords}
-        emergency={emergency}
-      />
+      <AnimatePresence>
+        {selectedPlace && (
+          <PlaceSheet
+            place={selectedPlace}
+            onClose={() => setSelectedPlace(null)}
+            isFavorite={isFavorite(selectedPlace.id)}
+            onToggleFavorite={handleToggleFavorite}
+            onShare={shareSearch}
+            aiDisabled={aiDisabled}
+            onAiDisabled={() => setAiDisabled(true)}
+            onReviewsLoaded={handleReviewsLoaded}
+            userCoords={coords}
+            emergency={emergency}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* First-run intro */}
+      <IntroModal open={showIntro} onClose={closeIntro} />
 
       {/* Back to top */}
       {showBackToTop && (
@@ -1069,7 +1163,8 @@ function HomeContent() {
       )}
 
       <Toast message={toast} />
-    </div>
+      </div>
+    </MotionConfig>
   )
 }
 

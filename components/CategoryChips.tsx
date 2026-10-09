@@ -37,7 +37,7 @@ export default function CategoryChips({ onSelect, activeQuery }: { onSelect: (qu
             type="button"
             onClick={() => onSelect(cat.query)}
             aria-pressed={active}
-            className={active ? 'chip chip-green' : 'chip chip-muted'}
+            className={(active ? 'chip chip-green' : 'chip chip-muted') + ' active:scale-95 transition-transform duration-150'}
             style={{
               cursor: 'pointer',
               fontFamily: "'Satoshi', sans-serif",

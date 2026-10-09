@@ -1,7 +1,7 @@
 'use client'
 import Link from 'next/link'
 import { motion, type Variants } from 'framer-motion'
-import { ChevronRight, ChevronsLeft, Heart, MapPin } from 'lucide-react'
+import { ChevronRight, ChevronsLeft, Heart, History, ListChecks, MapPin, Users } from 'lucide-react'
 import { usePathname } from 'next/navigation'
 import useIsMobile from '../../hooks/useIsMobile'
 import { useLanguage } from '../../hooks/useLanguage'
@@ -46,6 +46,9 @@ export default function AppSidebar({ mobileOpen = false, onNavigate = () => {}, 
   const navItems: NavEntry[] = [
     { icon: icon(MapPin), label: t('nav.home'), href: '/' },
     { icon: icon(Heart), label: t('nav.saved'), href: '/saved' },
+    { icon: icon(ListChecks), label: t('nav.errands'), href: '/#errands' },
+    { icon: icon(Users), label: t('nav.meet'), href: '/#meet' },
+    { icon: icon(History), label: t('nav.recent'), href: '/#recent' },
   ].map(item => ({ ...item, isActive: pathname === item.href }))
 
   // Desktop: collapsing slides the sidebar off to the left, freeing the full

@@ -1,5 +1,6 @@
 'use client'
 import { FormEvent, useEffect, useMemo, useState } from 'react'
+import { motion } from 'framer-motion'
 import {
   Car, ChevronDown, Copy, Footprints, Globe, Heart, MessageCircle, Navigation, Phone, Share2, Sparkles, X,
 } from 'lucide-react'
@@ -401,7 +402,13 @@ export default function PlaceSheet({
       }
 
   return (
-    <>
+    <motion.div
+      key="place-sheet"
+      initial={isMobile ? { y: 48, opacity: 0 } : { x: 48, opacity: 0 }}
+      animate={{ x: 0, y: 0, opacity: 1 }}
+      exit={isMobile ? { y: 48, opacity: 0 } : { x: 48, opacity: 0 }}
+      transition={{ duration: 0.2, ease: 'easeOut' }}
+    >
       {/* scrim — mobile only; desktop panel sits beside the content */}
       {isMobile && (
         <div
@@ -651,6 +658,6 @@ export default function PlaceSheet({
           </p>
         </div>
       </div>
-    </>
+    </motion.div>
   )
 }

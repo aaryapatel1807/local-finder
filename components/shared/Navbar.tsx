@@ -2,16 +2,10 @@
 import { Bell, Menu, Sun, Moon, PanelLeftClose, PanelLeftOpen, MapPin } from 'lucide-react'
 import useIsMobile from '../../hooks/useIsMobile'
 import { useLanguage } from '../../hooks/useLanguage'
+import { useGreeting } from '../../hooks/useGreeting'
 import LanguageSwitcher from '../LanguageSwitcher'
 import { useTheme } from './ThemeContext'
 import { useLocation } from './LocationContext'
-
-/** Hour-bucketed greeting key — rendered through t() in the component. */
-function greetingKey(hour: number): 'nav.morning' | 'nav.afternoon' | 'nav.evening' {
-  if (hour < 12) return 'nav.morning'
-  if (hour < 17) return 'nav.afternoon'
-  return 'nav.evening'
-}
 
 interface NavbarProps {
   onMenuClick?: () => void
@@ -24,6 +18,7 @@ export default function Navbar({ onMenuClick = () => {}, collapsed = false, onTo
   const { theme, toggleTheme } = useTheme()
   const { locationLabel, radiusKm } = useLocation()
   const { lang, setLang, t } = useLanguage()
+  const { greeting } = useGreeting()
 
   return (
     <div className="app-chrome app-chrome--merged" style={{
@@ -86,7 +81,7 @@ export default function Navbar({ onMenuClick = () => {}, collapsed = false, onTo
             </h1>
             {!isMobile && (
               <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '2px' }}>
-                {t(greetingKey(new Date().getHours()))} — {t('nav.subtitle')}
+                {greeting ? `${greeting} — ` : ''}{t('nav.subtitle')}
               </div>
             )}
           </div>
