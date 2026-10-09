@@ -706,7 +706,7 @@ function HomeContent() {
       <div style={{ position: 'relative', zIndex: 1 }}>
         <ScenicBackdrop />
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', isolation: 'isolate' }}>
         {/* Search */}
         <SearchBar
           value={input}

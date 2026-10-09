@@ -42,6 +42,10 @@ export default function FilterBar({
         alignItems: 'center',
         gap: '12px',
         flexWrap: 'wrap',
+        // Own stacking context: works around a Chromium compositing bug where
+        // static-positioned content can fail to paint above the fixed scenic
+        // backdrop layer (see CategoryChips for the same fix).
+        isolation: 'isolate',
       }}
       aria-label={t('filters.aria')}
     >

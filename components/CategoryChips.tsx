@@ -25,6 +25,10 @@ export default function CategoryChips({ onSelect, activeQuery }: { onSelect: (qu
         overflowX: 'auto',
         paddingBottom: '4px',
         scrollbarWidth: 'none',
+        // Own stacking context: works around a Chromium compositing bug where
+        // static-positioned content can fail to paint above the fixed scenic
+        // backdrop layer (see FilterBar for the same fix).
+        isolation: 'isolate',
       }}
     >
       {CATEGORIES.map(cat => {
