@@ -220,13 +220,21 @@ function HomeContent() {
   const runSearch = useCallback((q: string) => {
     const query = q.trim()
     if (!query) return
+    // If location isn't available yet (still loading/idle), fall back to
+    // Vadodara so the search actually runs instead of silently disabling.
+    // The location label updates so the user knows which area was searched.
+    if (!coords) {
+      const vadodara = CITY_FALLBACKS[0]
+      setCoords({ lat: vadodara.lat, lng: vadodara.lng })
+      setLocationLabel(vadodara.name)
+    }
     setEmergency(false)
     setEmergencyResults(null)
     setSubmittedQuery(query)
     setInput(query)
     setViewMode('list')
     setRecentSearches(prev => [query, ...prev.filter(r => r.toLowerCase() !== query.toLowerCase())].slice(0, 5))
-  }, [setRecentSearches])
+  }, [setRecentSearches, coords, setCoords, setLocationLabel])
 
   // ── AI answer for question-like queries (POST /api/answer) ───────────────
   const fetchAnswer = useCallback(async (text: string) => {
