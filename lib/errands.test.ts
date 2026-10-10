@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   midpoint,
   orderStopsNearestNeighbor,
+  orderStopsTimeAware,
   parseErrandInput,
   ERRAND_MAX_CATEGORIES,
 } from "./errands";
@@ -113,5 +114,47 @@ describe("parseErrandInput", () => {
 
   it("single category works", () => {
     expect(parseErrandInput("pharmacy")).toEqual(["pharmacy"]);
+  });
+});
+
+describe("orderStopsTimeAware", () => {
+  const NOW = new Date("2026-10-10T18:00:00+05:30"); // 6:00 PM IST
+  const start = { lat: 22.3072, lng: 73.1812 };
+
+  it("puts the earliest-closing stop first", () => {
+    const stops = [
+      { id: "a", lat: 22.308, lng: 73.182, name: "Late Shop", minutesToClose: 300 }, // closes 11 PM
+      { id: "b", lat: 22.309, lng: 73.183, name: "Early Pharmacy", minutesToClose: 30 }, // closes 6:30 PM, urgent
+    ];
+    const { ordered, warnings } = orderStopsTimeAware(stops, start, NOW);
+    expect(ordered[0].id).toBe("b");
+    expect(ordered[1].id).toBe("a");
+    expect(warnings.length).toBeGreaterThan(0);
+    expect(warnings[0]).toMatch(/Early Pharmacy closes at/);
+  });
+
+  it("warns when arrival is after closing", () => {
+    const stops = [
+      // ~5 km away ≈ 67 min walk; closes in 30 min → unreachable
+      { id: "far", lat: 22.35, lng: 73.22, name: "Far Clinic", minutesToClose: 30 },
+    ];
+    const { warnings } = orderStopsTimeAware(stops, start, NOW);
+    expect(warnings.some(w => /likely closed/.test(w))).toBe(true);
+  });
+
+  it("orders flexible stops (no hours) by distance after urgent ones", () => {
+    const stops = [
+      { id: "flex", lat: 22.3075, lng: 73.1815, name: "No Hours Shop" },
+      { id: "urgent", lat: 22.31, lng: 73.185, name: "Urgent Meds", minutesToClose: 45 },
+    ];
+    const { ordered } = orderStopsTimeAware(stops, start, NOW);
+    expect(ordered[0].id).toBe("urgent");
+    expect(ordered[1].id).toBe("flex");
+  });
+
+  it("handles empty input", () => {
+    const { ordered, warnings } = orderStopsTimeAware([], start, NOW);
+    expect(ordered).toEqual([]);
+    expect(warnings).toEqual([]);
   });
 });

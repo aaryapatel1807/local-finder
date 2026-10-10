@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { Footprints, Loader2, MapPin, Route as RouteIcon } from 'lucide-react'
 import GlassCard from './shared/GlassCard'
 import Button from './ui/button'
-import { parseErrandInput, orderStopsNearestNeighbor, ERRAND_MAX_CATEGORIES } from '../lib/errands'
+import { parseErrandInput, orderStopsTimeAware, ERRAND_MAX_CATEGORIES } from '../lib/errands'
 import { haversineKm } from '../lib/distance'
 import type { Place, SearchResponse } from './types'
 import { useLanguage } from '../hooks/useLanguage'
@@ -18,6 +18,12 @@ interface PlannedStop {
   walkMins: number
   legKm: number
   estimated: boolean
+  /** Minutes from plan start until arrival (time-aware ordering). */
+  arrivalMins: number
+  /** "Closes 9:00 PM" label when closing time is known. */
+  closeLabel: string | null
+  /** "Arrive ~6:45 PM" label. */
+  arrivalLabel: string
 }
 
 interface Leg {
@@ -59,6 +65,22 @@ async function fetchLeg(from: { lat: number; lng: number }, to: { lat: number; l
 
 function fmtMins(mins: number): string {
   return mins < 60 ? `${Math.round(mins)} min` : `${Math.floor(mins / 60)}h ${Math.round(mins % 60)}m`
+}
+
+/** "9:00 PM" for a closing time `minsToClose` minutes after `now`. */
+function formatCloseTime(now: Date, minsToClose: number): string {
+  const d = new Date(now.getTime() + minsToClose * 60000)
+  let h = d.getHours()
+  const m = d.getMinutes()
+  const ap = h >= 12 ? 'PM' : 'AM'
+  h = h % 12
+  if (h === 0) h = 12
+  return `${h}:${String(m).padStart(2, '0')} ${ap}`
+}
+
+/** "6:45 PM" arrival label for `arrivalMins` after `now`. */
+function formatArrivalTime(now: Date, arrivalMins: number): string {
+  return formatCloseTime(now, arrivalMins)
 }
 
 export default function ErrandPlanner({ coords }: Props) {
@@ -119,13 +141,23 @@ export default function ErrandPlanner({ coords }: Props) {
       return
     }
 
-    // Phase 2: order stops, then fetch each walking leg.
+    // Phase 2: time-aware ordering (closing times + travel), then fetch each leg.
     setPhase('routing')
     setPhaseNote(t('errand.routingNote'))
-    const ordered = orderStopsNearestNeighbor(
-      found.map(f => ({ id: f.place.id, lat: f.place.lat, lng: f.place.lng })),
-      coords
+    const now = new Date()
+    const timed = orderStopsTimeAware(
+      found.map(f => ({
+        id: f.place.id,
+        lat: f.place.lat,
+        lng: f.place.lng,
+        name: f.place.name,
+        minutesToClose: f.place.minutesToClose,
+      })),
+      coords,
+      now
     )
+    const ordered = timed.ordered
+    const arrivalById = new Map(timed.ordered.map((s, i) => [s.id, timed.arrivalMins[i]]))
     const byId = new Map(found.map(f => [f.place.id, f]))
     const planned: PlannedStop[] = []
     let from = { lat: coords.lat, lng: coords.lng }
@@ -133,18 +165,27 @@ export default function ErrandPlanner({ coords }: Props) {
       const entry = byId.get(stop.id)
       if (!entry) continue
       const leg = await fetchLeg(from, { lat: stop.lat, lng: stop.lng })
+      const minsToClose = entry.place.minutesToClose
+      const arrival = arrivalById.get(stop.id) ?? 0
       planned.push({
         place: entry.place,
         category: entry.category,
         walkMins: leg.mins,
         legKm: leg.km,
         estimated: leg.estimated,
+        arrivalMins: arrival,
+        closeLabel:
+          minsToClose != null && Number.isFinite(minsToClose)
+            ? `Closes ${formatCloseTime(now, minsToClose)}`
+            : null,
+        arrivalLabel: `Arrive ~${formatArrivalTime(now, arrival)}`,
       })
       from = { lat: stop.lat, lng: stop.lng }
     }
     setStops(planned)
     setTotalMins(planned.reduce((sum, s) => sum + s.walkMins, 0))
     setNotes([
+      ...timed.warnings,
       ...skipped.map(c => `No results for "${c}" — skipped.`),
       ...(planned.some(s => s.estimated) ? [t('errand.estimatesNote')] : []),
     ])
@@ -161,9 +202,9 @@ export default function ErrandPlanner({ coords }: Props) {
         <h3 style={{ fontSize: '1.05rem' }}>{t('errand.title')}</h3>
       </div>
       <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginBottom: '12px' }}>
-        List up to {ERRAND_MAX_CATEGORIES} stops and I'll order them into the shortest
-        walking route. Capped at {ERRAND_MAX_CATEGORIES} categories — each new category
-        costs one search credit.
+        List up to {ERRAND_MAX_CATEGORIES} stops — I'll order them by closing time
+        and walking distance, so you reach places before they shut. Capped at{' '}
+        {ERRAND_MAX_CATEGORIES} categories — each new category costs one search credit.
       </p>
 
       <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
@@ -233,13 +274,29 @@ export default function ErrandPlanner({ coords }: Props) {
                     {s.category}
                     {s.place.address ? ` · ${s.place.address}` : ''}
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '6px', fontSize: '0.82rem', color: 'var(--text-primary)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '6px', fontSize: '0.82rem', color: 'var(--text-primary)', flexWrap: 'wrap' }}>
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
                       <Footprints size={14} /> {s.estimated ? '~' : ''}{fmtMins(s.walkMins)} {t('errand.walkSuffix')}
                     </span>
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: 'var(--text-muted)' }}>
                       <MapPin size={14} /> {s.legKm.toFixed(1)} km
                     </span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px', fontSize: '0.78rem', flexWrap: 'wrap' }}>
+                    <span style={{ color: 'var(--text-muted)' }}>{s.arrivalLabel}</span>
+                    {s.closeLabel && (
+                      <span
+                        style={{
+                          color: 'var(--accent-deep)',
+                          fontWeight: 600,
+                          background: 'rgba(217,119,6,0.12)',
+                          borderRadius: '8px',
+                          padding: '2px 8px',
+                        }}
+                      >
+                        {s.closeLabel}
+                      </span>
+                    )}
                   </div>
                 </div>
               </li>
