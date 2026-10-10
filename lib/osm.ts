@@ -31,7 +31,9 @@ const CATEGORY_TAGS: Record<string, string[]> = {
     '["amenity"="pharmacy"]',
     '["shop"="chemist"]',
     '["shop"="pharmacy"]',
-    '["amenity"="doctors"]["healthcare"="pharmacy"]',
+    // Name fallback: many Indian medical stores aren't tagged as pharmacies
+    // but have pharmacy/medical/chemist/davakhana in the name.
+    '["name"~"(pharmacy|medical|chemist|davakhana|medico)",i]',
   ],
   atm: ['["amenity"="atm"]', '["amenity"="bank"]["atm"="yes"]'],
   petrol: ['["amenity"="fuel"]'],
