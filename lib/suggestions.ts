@@ -43,9 +43,9 @@ export function slotForHour(hour: number): SuggestionSlot {
       headingKey: 'suggest.morningHeading',
       HeadingIcon: Sunrise,
       chips: [
-        { labelKey: 'suggest.morningChai', query: 'chai near me', Icon: Coffee },
         { labelKey: 'suggest.bakery', query: 'bakery near me', Icon: Croissant },
         { labelKey: 'suggest.breakfast', query: 'breakfast near me', Icon: UtensilsCrossed },
+        { labelKey: 'suggest.juice', query: 'fresh juice near me', Icon: Coffee },
       ],
     }
   }
@@ -66,8 +66,8 @@ export function slotForHour(hour: number): SuggestionSlot {
       HeadingIcon: Clock,
       chips: [
         { labelKey: 'suggest.dinner', query: 'dinner near me', Icon: UtensilsCrossed },
-        { labelKey: 'suggest.groceries', query: 'grocery store near me', Icon: ShoppingCart },
-        { labelKey: 'suggest.pharmacy', query: 'pharmacy near me', Icon: Pill },
+        { labelKey: 'suggest.streetFood', query: 'street food near me', Icon: UtensilsCrossed },
+        { labelKey: 'suggest.chaat', query: 'chaat near me', Icon: ShoppingCart },
       ],
     }
   }
@@ -77,7 +77,7 @@ export function slotForHour(hour: number): SuggestionSlot {
     chips: [
       { labelKey: 'suggest.nightPharmacy', query: '24 hour pharmacy near me', Icon: Pill },
       { labelKey: 'suggest.hospital', query: 'hospital near me', Icon: Hospital },
-      { labelKey: 'suggest.petrol', query: 'petrol pump near me', Icon: Fuel },
+      { labelKey: 'suggest.lateNightFood', query: 'late night food near me', Icon: Moon },
     ],
   }
 }

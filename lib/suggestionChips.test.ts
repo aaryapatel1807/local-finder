@@ -31,9 +31,9 @@ describe('slotForHour', () => {
   })
 
   it('keeps chip queries in English', () => {
-    expect(slotForHour(6).chips[0].query).toBe('chai near me')
+    expect(slotForHour(6).chips[0].query).toBe('bakery near me')
     expect(slotForHour(12).chips[1].query).toBe('cafe near me')
-    expect(slotForHour(20).chips[2].query).toBe('pharmacy near me')
+    expect(slotForHour(20).chips[2].query).toBe('chaat near me')
     expect(slotForHour(23).chips[0].query).toBe('24 hour pharmacy near me')
   })
 

@@ -15,7 +15,7 @@ export default function Button({ variant = 'ghost', className, children, ...prop
   const variants: Record<string, string> = {
     primary:
       'text-white rounded-xl px-5 py-3 text-sm hover:scale-[1.02] active:scale-[0.98] ' +
-      'bg-[linear-gradient(135deg,#FF6B5E,#FFB020_55%,#7B61FF)] shadow-[0_4px_16px_rgba(255,107,94,0.35)]',
+      'bg-[linear-gradient(135deg,#E8382A,#F5840A_55%,#5B3DF5)] shadow-[0_4px_20px_rgba(232,56,42,0.5)]',
     ghost:
       'rounded-xl px-4 py-2.5 text-sm bg-[var(--bg-card)] border border-[var(--border)] ' +
       'text-[var(--text-primary)] hover:border-[var(--accent)]',
