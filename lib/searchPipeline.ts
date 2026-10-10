@@ -249,6 +249,10 @@ async function fetchLive(
 /**
  * Run the full search pipeline: cache -> fetch -> normalize -> dedupe ->
  * score -> sort -> cap. Throws SerpApiError on upstream failure.
+ *
+ * Data tiers (no SerpApi key needed for real data): when USE_MOCK=false and
+ * no SERPAPI_KEY is set, the OSM Overpass fallback serves real community
+ * places with a "Community data" badge — zero quota, zero cost.
  */
 export async function searchPlaces(
   input: SearchPipelineInput
