@@ -217,7 +217,12 @@ async function fetchLive(
   }
 
   if (serpPlaces.length > 0) {
-    return { places: serpPlaces };
+    // Coverage merge: SerpApi ranks by prominence (chains dominate), so
+    // nearby independents get buried. OSM is free + cached — merge it in
+    // so every nearby place shows, deduped against the SerpApi set.
+    const osmPlaces = await searchOsmCached(canonical, lat, lng, radiusKm, origin);
+    const merged = dedupePlaces([...serpPlaces, ...osmPlaces]);
+    return { places: merged };
   }
 
   // Fallback tier: OSM. Reached when there is no key, quota is

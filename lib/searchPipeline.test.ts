@@ -117,13 +117,15 @@ describe("OSM fallback tier", () => {
     expect(res.places.some((p) => p.name === "OSM Pharmacy")).toBe(true);
   });
 
-  it("prefers SerpApi results when the call succeeds (no OSM call)", async () => {
+  it("merges OSM for coverage when SerpApi succeeds (SerpApi wins dupes)", async () => {
     process.env.SERPAPI_KEY = "test-key";
     const res = await searchPlaces({ query: "pharmacy", lat: LAT, lng: LNG, radiusKm: 3 });
     expect(res.fallback).toBeUndefined();
-    expect(mockOsmSearch).not.toHaveBeenCalled();
+    expect(mockOsmSearch).toHaveBeenCalled();
+    // SerpApi result keeps its rich data when OSM has the same place
     expect(res.places[0].name).toBe("Serp Pharmacy");
-    expect(res.places[0].source).toBeUndefined();
+    // OSM-only places are included for coverage
+    expect(res.places.some((p) => p.name === "OSM Pharmacy")).toBe(true);
   });
 
   it("throws QUOTA_EXCEEDED when quota is exhausted and OSM is empty", async () => {
