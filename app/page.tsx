@@ -19,6 +19,7 @@ import Toast from '../components/Toast'
 import AmbiguityChips from '../components/AmbiguityChips'
 import AnswerCard, { UnverifiedAnswerCard } from '../components/AnswerCard'
 import CompareTable from '../components/CompareTable'
+import Accordion from '../components/Accordion'
 import ErrandPlanner from '../components/ErrandPlanner'
 import MeetInMiddle from '../components/MeetInMiddle'
 import LocationPicker, { PINNED_STORAGE_KEY } from '../components/LocationPicker'
@@ -30,6 +31,7 @@ import EmergencyButton from '../components/EmergencyButton'
 import { GlobeHero } from '../components/GlobeHeroLazy'
 import { hasSeenIntro, markIntroSeen } from '../lib/introSeen'
 import { useGeolocation, CITY_FALLBACKS, type CityOption, type Coords } from '../hooks/useGeolocation'
+import { detectEmergencyIntent } from '../lib/canonical'
 import { useSearch } from '../hooks/useSearch'
 import { useFavorites } from '../hooks/useFavorites'
 import { useHealth } from '../hooks/useHealth'
@@ -220,6 +222,11 @@ function HomeContent() {
   const runSearch = useCallback((q: string) => {
     const query = q.trim()
     if (!query) return
+    // Emergency intent ("fever at 11pm" -> pharmacy): remap the query and
+    // force "Open now" on, so urgent needs only show places open right now.
+    const emergencyCategory = detectEmergencyIntent(query)
+    const effectiveQuery = emergencyCategory ?? query
+    if (emergencyCategory) setOpenNow(true)
     // If location isn't available yet (still loading/idle), fall back to
     // Vadodara so the search actually runs instead of silently disabling.
     // The location label updates so the user knows which area was searched.
@@ -230,11 +237,11 @@ function HomeContent() {
     }
     setEmergency(false)
     setEmergencyResults(null)
-    setSubmittedQuery(query)
-    setInput(query)
+    setSubmittedQuery(effectiveQuery)
+    setInput(effectiveQuery)
     setViewMode('list')
-    setRecentSearches(prev => [query, ...prev.filter(r => r.toLowerCase() !== query.toLowerCase())].slice(0, 5))
-  }, [setRecentSearches, coords, setCoords, setLocationLabel])
+    setRecentSearches(prev => [effectiveQuery, ...prev.filter(r => r.toLowerCase() !== effectiveQuery.toLowerCase())].slice(0, 5))
+  }, [setRecentSearches, coords, setCoords, setLocationLabel, setOpenNow])
 
   // ── AI answer for question-like queries (POST /api/answer) ───────────────
   const fetchAnswer = useCallback(async (text: string) => {
@@ -752,13 +759,13 @@ function HomeContent() {
           onPriceBandChange={setPriceBand}
         />
 
-        {/* Errand planner + meet in the middle */}
-        <div id="errands" style={{ scrollMarginTop: '90px' }}>
+        {/* Errand planner + meet in the middle (collapsed so results stay above the fold) */}
+        <Accordion id="errands" title={t('errand.title')}>
           <ErrandPlanner coords={coords} />
-        </div>
-        <div id="meet" style={{ scrollMarginTop: '90px' }}>
+        </Accordion>
+        <Accordion id="meet" title={t('meet.title')}>
           <MeetInMiddle myCoords={coords} onMeet={handleMeet} />
-        </div>
+        </Accordion>
 
         {/* Location status (accuracy badge + set on map) */}
         {geoStatus !== 'denied' && (
