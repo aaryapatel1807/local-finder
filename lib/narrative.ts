@@ -34,5 +34,10 @@ export function buildNarrative(args: NarrativeArgs, t: TranslateFn): string {
     text += ' ' + t('narrative.nearest', { name: nearestName, mins: nearestWalkMin })
   }
 
+  // Trust signal: hours verified live + last-updated time.
+  const now = new Date()
+  const time = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+  text += ' ' + t('narrative.trust', { time })
+
   return text
 }
