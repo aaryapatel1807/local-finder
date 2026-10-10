@@ -7,6 +7,7 @@ import Badge from './ui/badge'
 import GlassCard from './shared/GlassCard'
 import RouteBadge from './RouteBadge'
 import ReviewSummaryLine from './ReviewSummaryLine'
+import PlaceImage from './PlaceImage'
 import { useRouteTime } from '../hooks/useRouteTime'
 import { useLanguage } from '../hooks/useLanguage'
 
@@ -112,10 +113,17 @@ export default function PlaceCard({
       onClick={() => onOpen(place)}
       style={{
         display: 'flex',
-        gap: '12px',
-        alignItems: 'flex-start',
+        flexDirection: 'column',
+        gap: '0',
         cursor: 'pointer',
         outline: highlighted ? '2px solid var(--accent)' : undefined,
+      }}
+    >
+      <PlaceImage place={place} />
+      <div style={{
+        display: 'flex',
+        gap: '12px',
+        alignItems: 'flex-start',
       }}
     >
       <div style={{ flexShrink: 0 }}>
@@ -254,6 +262,7 @@ export default function PlaceCard({
         {place.openLabel && (
           <div style={{ fontSize: '0.78rem', color: 'var(--text-faint)', marginTop: '4px' }}>{place.openLabel}</div>
         )}
+      </div>
       </div>
     </GlassCard>
   )
