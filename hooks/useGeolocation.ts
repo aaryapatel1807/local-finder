@@ -26,7 +26,13 @@ export const CITY_FALLBACKS: CityOption[] = [
 ]
 
 /** Watch-position refinement window (ms) — collect fixes, keep the most accurate. */
-export const GEO_REFINEMENT_MS = 5000
+export const GEO_REFINEMENT_MS = 15000
+
+/** Fixes worse than this accuracy (m) are treated as unreliable. */
+export const GEO_MAX_ACCEPTABLE_ACCURACY_M = 1000
+
+/** Target accuracy (m) — stop refining early once we hit this. */
+export const GEO_TARGET_ACCURACY_M = 100
 
 /**
  * Browser geolocation with watchPosition refinement: collects fixes for up
@@ -75,10 +81,19 @@ export function useGeolocation() {
 
     const finish = () => {
       stopWatching()
-      if (best) {
+      if (best && best.accuracy <= GEO_MAX_ACCEPTABLE_ACCURACY_M) {
         setCoords({ lat: best.lat, lng: best.lng })
         setAccuracyMeters(best.accuracy)
         setStatus('granted')
+      } else if (best) {
+        // We got a fix but it's too coarse to trust (e.g. ±15 km network
+        // fix). Tell the user instead of silently poisoning results.
+        setStatus('denied')
+        setError(
+          `Location is too imprecise (±${Math.round(best.accuracy / 1000)} km). ` +
+          'Try moving outdoors, or set your location on the map.'
+        )
+        setErrorKey('geo.unavailable')
       } else {
         setStatus('denied')
         setError('Could not get your location. Type a city below or set it on the map.')
@@ -96,8 +111,16 @@ export function useGeolocation() {
             lng: pos.coords.longitude,
             accuracy: Number.isFinite(accuracy) ? Math.round(accuracy) : accuracy,
           }
-          setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude })
-          setAccuracyMeters(Number.isFinite(accuracy) ? Math.round(accuracy) : null)
+          // Only push to UI when the fix is usable — a 15km-accurate
+          // network fix is worse than no fix (it silently poisons results).
+          if (accuracy <= GEO_MAX_ACCEPTABLE_ACCURACY_M) {
+            setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude })
+            setAccuracyMeters(Number.isFinite(accuracy) ? Math.round(accuracy) : null)
+          }
+        }
+        // Stop early once we have a good fix — no need to wait the full window.
+        if (best && best.accuracy <= GEO_TARGET_ACCURACY_M) {
+          finish()
         }
       },
       err => {
