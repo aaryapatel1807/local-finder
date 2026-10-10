@@ -1052,6 +1052,9 @@ function HomeContent() {
           <GlassCard className="text-center" style={{ padding: '32px 24px' }}>
             <GlobeHero />
             <h2 style={{ fontSize: '1.3rem', marginBottom: '8px' }}>{t('page.welcomeTitle')}</h2>
+            <p style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--text)', maxWidth: 440, margin: '0 auto 8px' }}>
+              {t('page.tagline')}
+            </p>
             <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', maxWidth: 420, margin: '0 auto 16px' }}>
               {t('page.welcomeBody')}
             </p>
