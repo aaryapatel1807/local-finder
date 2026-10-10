@@ -1,5 +1,5 @@
 'use client'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Footprints, Loader2, MapPin, Route as RouteIcon } from 'lucide-react'
 import GlassCard from './shared/GlassCard'
 import Button from './ui/button'
@@ -92,6 +92,17 @@ export default function ErrandPlanner({ coords }: Props) {
   const [notes, setNotes] = useState<string[]>([])
   const [totalMins, setTotalMins] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
+
+  // Clear stale plan when the location changes — a plan for Vadodara
+  // must not linger after the user switches to Ahmedabad.
+  const coordsKey = coords ? `${coords.lat.toFixed(4)},${coords.lng.toFixed(4)}` : 'none'
+  useEffect(() => {
+    setStops([])
+    setNotes([])
+    setTotalMins(null)
+    setError(null)
+    setPhase('idle')
+  }, [coordsKey])
 
   const plan = async () => {
     if (!coords) return
