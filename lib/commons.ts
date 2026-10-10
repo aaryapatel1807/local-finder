@@ -64,3 +64,4 @@ export async function findCommonsImage(query: string): Promise<CommonsImage | nu
     clearTimeout(timer);
   }
 }
+// redeploy: pick up SERPAPI_KEY
