@@ -27,8 +27,13 @@ const MAX_ELEMENTS = 40;
 
 /** canonicalKey -> Overpass tag selectors. */
 const CATEGORY_TAGS: Record<string, string[]> = {
-  pharmacy: ['["amenity"="pharmacy"]'],
-  atm: ['["amenity"="atm"]'],
+  pharmacy: [
+    '["amenity"="pharmacy"]',
+    '["shop"="chemist"]',
+    '["shop"="pharmacy"]',
+    '["amenity"="doctors"]["healthcare"="pharmacy"]',
+  ],
+  atm: ['["amenity"="atm"]', '["amenity"="bank"]["atm"="yes"]'],
   petrol: ['["amenity"="fuel"]'],
   clinic: ['["amenity"~"^(clinic|doctors)$"]'],
   hospital: ['["amenity"="hospital"]'],
