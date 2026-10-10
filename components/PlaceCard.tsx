@@ -6,6 +6,7 @@ import { formatDistance } from './types'
 import Badge from './ui/badge'
 import GlassCard from './shared/GlassCard'
 import RouteBadge from './RouteBadge'
+import ReviewSummaryLine from './ReviewSummaryLine'
 import { useRouteTime } from '../hooks/useRouteTime'
 import { useLanguage } from '../hooks/useLanguage'
 
@@ -247,6 +248,8 @@ export default function PlaceCard({
             <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 600 }}>{place.price}</span>
           )}
         </div>
+
+        <ReviewSummaryLine place={place} />
 
         {place.openLabel && (
           <div style={{ fontSize: '0.78rem', color: 'var(--text-faint)', marginTop: '4px' }}>{place.openLabel}</div>

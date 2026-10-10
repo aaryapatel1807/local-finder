@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canonicalKey, normalizeQueryText } from "./canonical";
+import { canonicalKey, normalizeQueryText, detectEmergencyIntent } from "./canonical";
 
 describe("normalizeQueryText", () => {
   it("lowercases, strips punctuation, collapses spaces", () => {
@@ -46,5 +46,29 @@ describe("canonicalKey", () => {
   it("prefers the longest alias", () => {
     expect(canonicalKey("medical store")).toBe("pharmacy");
     expect(canonicalKey("chai tapri")).toBe("chai");
+  });
+});
+
+describe("detectEmergencyIntent", () => {
+  it("maps 'fever at 11pm' to pharmacy", () => {
+    expect(detectEmergencyIntent("fever at 11pm")).toBe("pharmacy");
+  });
+
+  it("maps 'bike puncture' to mechanic", () => {
+    expect(detectEmergencyIntent("bike puncture")).toBe("mechanic");
+  });
+
+  it("maps 'flat tyre' to mechanic", () => {
+    expect(detectEmergencyIntent("I have a flat tyre")).toBe("mechanic");
+  });
+
+  it("returns null for non-emergency queries", () => {
+    expect(detectEmergencyIntent("best chai near me")).toBeNull();
+    expect(detectEmergencyIntent("pharmacy")).toBeNull();
+    expect(detectEmergencyIntent("")).toBeNull();
+  });
+
+  it("does not false-positive on substrings", () => {
+    expect(detectEmergencyIntent("feverfew tea")).toBeNull();
   });
 });

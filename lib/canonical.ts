@@ -99,3 +99,41 @@ export function canonicalKey(text: string): string {
   }
   return normalized;
 }
+
+/* ------------------------------------------------------------------ */
+/* Emergency intent detection                                          */
+/* ------------------------------------------------------------------ */
+
+/** Emergency phrase -> canonical category. Whole-word matching. */
+const EMERGENCY_INTENTS: [string, string][] = [
+  // medical urgency -> pharmacy
+  ["fever", "pharmacy"],
+  ["urgent medicine", "pharmacy"],
+  ["medicine urgently", "pharmacy"],
+  ["need medicine", "pharmacy"],
+  ["medical emergency", "pharmacy"],
+  // vehicle trouble -> mechanic
+  ["puncture", "mechanic"],
+  ["flat tyre", "mechanic"],
+  ["flat tire", "mechanic"],
+  ["bike breakdown", "mechanic"],
+  ["car breakdown", "mechanic"],
+  ["tow truck", "mechanic"],
+];
+
+const EMERGENCY_SORTED = [...EMERGENCY_INTENTS].sort((a, b) => b[0].length - a[0].length);
+
+/**
+ * Detect emergency intent in a raw query ("fever at 11pm" -> pharmacy).
+ * Returns the canonical category, or null when there's no emergency signal.
+ * Callers should force the "Open now" filter on when this matches.
+ */
+export function detectEmergencyIntent(text: string): string | null {
+  const normalized = normalizeQueryText(text);
+  if (!normalized) return null;
+  for (const [phrase, canonical] of EMERGENCY_SORTED) {
+    const re = new RegExp(`(^|\\s)${escapeRegExp(phrase)}(\\s|$)`);
+    if (re.test(normalized)) return canonical;
+  }
+  return null;
+}
