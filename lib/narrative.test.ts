@@ -5,6 +5,7 @@ const TEMPLATES: Record<string, string> = {
   'narrative.summary': '{count} places within {radius} km, {openCount} open right now.',
   'narrative.none': 'No places found within {radius} km. Try widening your search area.',
   'narrative.nearest': 'Nearest: {name}, {mins} min walk.',
+  'narrative.trust': 'Hours verified live · updated {time}.',
 }
 
 /** Stub t() that mirrors the dictionary's {var} interpolation. */
@@ -21,26 +22,24 @@ describe('buildNarrative', () => {
   })
 
   it('summarizes count, radius and open count', () => {
-    expect(buildNarrative({ count: 7, openCount: 5, radiusKm: 3 }, t)).toBe(
-      '7 places within 3 km, 5 open right now.',
-    )
+    const out = buildNarrative({ count: 7, openCount: 5, radiusKm: 3 }, t)
+    expect(out.startsWith('7 places within 3 km, 5 open right now.')).toBe(true)
+    expect(out).toContain('Hours verified live')
   })
 
   it('appends the nearest-place line when both nearest fields are present', () => {
-    expect(
-      buildNarrative(
-        {
-          count: 7,
-          openCount: 5,
-          radiusKm: 3,
-          nearestName: 'Apollo Pharmacy',
-          nearestWalkMin: 12,
-        },
-        t,
-      ),
-    ).toBe(
-      '7 places within 3 km, 5 open right now. Nearest: Apollo Pharmacy, 12 min walk.',
+    const out = buildNarrative(
+      {
+        count: 7,
+        openCount: 5,
+        radiusKm: 3,
+        nearestName: 'Apollo Pharmacy',
+        nearestWalkMin: 12,
+      },
+      t,
     )
+    expect(out.startsWith('7 places within 3 km, 5 open right now. Nearest: Apollo Pharmacy, 12 min walk.')).toBe(true)
+    expect(out).toContain('Hours verified live')
   })
 
   it('skips the nearest line when nearest info is absent', () => {
